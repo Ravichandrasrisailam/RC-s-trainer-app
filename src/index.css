@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Inter', sans-serif;
+    font-weight: 300;
+    background-color: #060608;
+    color: #e4e4e7;
+    letter-spacing: 0.02em;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Bitcount Prop Single', 'Space Mono', 'JetBrains Mono', monospace;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+  }
+}
+
+.font-bitcount {
+  font-family: 'Bitcount Prop Single', 'Space Mono', 'JetBrains Mono', monospace;
+}
+
+.font-mono-num {
+  font-family: 'Bitcount Prop Single', 'JetBrains Mono', 'Space Mono', monospace;
+  font-weight: 300;
+  letter-spacing: 0.05em;
+}
+
+.font-display {
+  font-family: 'Bitcount Prop Single', 'Inter', sans-serif;
+  font-weight: 300;
+  letter-spacing: 0.04em;
+}
+
+.font-space {
+  font-family: 'Space Mono', monospace;
+  font-weight: 300;
+}
+
+/* Minimalist Thin Border Cards */
+.rc-card-thin {
+  background: rgba(18, 18, 22, 0.65);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+}
+
+.rc-card-thin:hover {
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
+/* Hide scrollbar for clean UI */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Custom scrollbar for sleek dark look */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: #060608;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #dc2626;
+}
+
+

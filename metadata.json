@@ -1,0 +1,6 @@
+{
+  "name": "RC Trainer",
+  "description": "RC Trainer - Cinematic High-Performance AI Fitness & Biometrics App with dynamic workout generator, crimson muscle recovery radar, and macro analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
