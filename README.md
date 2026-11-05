@@ -10,8 +10,8 @@ Responsive fitness tracker with a React JavaScript client and a separate Java 21
 - Build/test: npm, Maven, JUnit 5, Mockito
 
 ## Run locally
-1. Copy `.env.example` to `.env` and set the frontend's Supabase URL and publishable key.
-2. Start the web app: `cd frontend && npm install && npm run dev`.
+1. Copy `.env.example` to `frontend/.env.local` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Vite only loads environment files from the frontend project directory.
+2. Start the web app: `cd frontend && npm ci && npm run dev`.
 3. Optional Java API: start local PostgreSQL with `docker compose up -d postgres`, configure `DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and a strong `JWT_SECRET`, then run `cd backend && mvn spring-boot:run`.
 
 Frontend defaults to `http://localhost:5173`; optional API defaults to `http://localhost:8080`. The current web client uses Supabase directly and does not depend on the Java API.
@@ -27,9 +27,14 @@ Workers AI publishes a daily free allocation of 10,000 Neurons. Requests fail cl
 
 Generated nutrition is approximate and not medical advice. The function derives personalization from the signed-in user's saved profile, validates the generated response, and keeps the provider token server-side.
 
+New users must enter their own profile and nutrition targets before plans are generated. Meal and workout screens remain empty until the personalized AI plan is successfully generated; no sample meals or workouts are used as fallback content.
+
 ## Data and deployment
-- User-specific meal plans, workout plans, steps, weight, and activity records are persisted in Supabase and protected by row-level security.
-- Vercel Preview should have `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` configured for Preview; production values remain separately scoped.
+- User-specific meal plans, workout plans, logged meal/step/weight activity, and individual workout sets are persisted in Supabase and protected by row-level security.
+- Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in both the intended Vercel Preview and Production environments. These values are embedded at build time, so redeploy after changing them; keep Cloudflare credentials exclusively in Supabase Edge Function secrets.
+- The Vercel build deploys only the static frontend. Apply all tracked Supabase migrations to the intended project and deploy `generate-plan` to that same project. Migration `202611050003_app_data_and_ai_limits.sql` creates the core app tables if missing, installs user-scoped policies using app-owned policy names, and adds a per-user AI request limit. Review existing table schemas and policies and confirm the linked project before applying it.
+- For a new or Preview Supabase project, install and authenticate the Supabase CLI, run `supabase link --project-ref <PREVIEW_PROJECT_REF>`, then `supabase db push` and `supabase functions deploy generate-plan`. Apply migrations and verify sign-in, reads, and writes on Preview before applying the same release to Production. AI generation is limited to five requests per signed-in user per minute.
+- Before Production, rotate any Cloudflare Workers AI token that may have been exposed, update the Supabase Edge Function secret, and confirm the token is scoped to Workers AI. Never place it in Vercel or a `VITE_` variable.
 - Verify the signed-in flows in a Preview deployment before promoting or merging to Production.
 - OAuth provider setup is managed in Supabase Authentication. Configure the provider's client credentials and allowed redirect URLs in Supabase; do not commit credentials.
 - The separate Spring API still uses its local PostgreSQL/Flyway schema and is not the current frontend data path.

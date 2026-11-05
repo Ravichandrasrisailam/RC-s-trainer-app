@@ -1,0 +1,4 @@
+project_id = "rc-trainer-app"
+
+[functions.generate-plan]
+verify_jwt = true

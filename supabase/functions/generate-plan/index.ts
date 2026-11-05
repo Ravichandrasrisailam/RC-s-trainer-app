@@ -12,6 +12,14 @@ function respond(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: cors });
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNutritionValue(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 999999.99;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return respond({ error: "Method not allowed." }, 405);
@@ -29,13 +37,15 @@ Deno.serve(async (req: Request) => {
   const { data: userData, error: authError } = await supabase.auth.getUser(token);
   if (authError || !userData.user) return respond({ error: "Session expired. Please sign in again." }, 401);
 
-  let body: { task?: string; description?: string };
-  try { body = await req.json(); } catch { return respond({ error: "Invalid JSON request." }, 400); }
-  const task = body.task || "generate-workout";
+  let requestBody: unknown;
+  try { requestBody = await req.json(); } catch { return respond({ error: "Invalid JSON request." }, 400); }
+  if (!isRecord(requestBody)) return respond({ error: "A JSON object is required." }, 400);
+  const task = typeof requestBody.task === "string" ? requestBody.task : "generate-workout";
   let prompt: string;
 
   if (task === "estimate-meal") {
-    const description = (body.description || "").trim().slice(0, 500);
+    if (typeof requestBody.description !== "string") return respond({ error: "Describe the meal first." }, 400);
+    const description = requestBody.description.trim().slice(0, 500);
     if (!description) return respond({ error: "Describe the meal first." }, 400);
     prompt = `Estimate nutrition for the described meal and portion. Respond only with JSON keys name, calories, protein, carbs, fats, fiber. Calories are kcal and all macros are grams. Values must be non-negative numbers. Be conservative and state estimate in name. This is approximate, not medical advice. Meal: ${description}`;
   } else if (task === "generate-meals") {
@@ -62,6 +72,13 @@ Deno.serve(async (req: Request) => {
     if (!accountId || !apiToken) {
       return respond({ error: "AI is not configured yet. Add CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN to Supabase Edge Function secrets." }, 503);
     }
+    const { data: allowed, error: limitError } = await supabase.rpc("consume_ai_generation_slot");
+    if (limitError) {
+      console.error("AI request limit check failed", limitError.message);
+      return respond({ error: "AI generation is temporarily unavailable. Please try again later." }, 503);
+    }
+    if (!allowed) return respond({ error: "You have reached the AI request limit. Please wait a minute and try again." }, 429);
+
     const model = Deno.env.get("CLOUDFLARE_AI_MODEL") || "@cf/meta/llama-3.1-8b-instruct";
     const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model.split("/").map(encodeURIComponent).join("/")}`;
     const result = await fetch(endpoint, {
@@ -75,7 +92,8 @@ Deno.serve(async (req: Request) => {
         response_format: { type: "json_object" },
         temperature: 0.35,
         max_tokens: 5000
-      })
+      }),
+      signal: AbortSignal.timeout(30_000)
     });
     if (!result.ok) {
       const detail = await result.text();
@@ -83,27 +101,51 @@ Deno.serve(async (req: Request) => {
       if (result.status === 429) return respond({ error: "The free AI allowance is temporarily exhausted. Please try again after the daily quota resets." }, 429);
       return respond({ error: "The AI provider could not generate a response. Check the Cloudflare Workers AI account and token." }, 502);
     }
-    const resultBody = await result.json();
-    const generated = resultBody?.result?.response ?? resultBody?.result;
-    const parsed = typeof generated === "string" ? JSON.parse(generated) : generated;
-    if (!parsed || typeof parsed !== "object") throw new Error("Invalid JSON response");
+    const resultBody: unknown = await result.json();
+    if (!isRecord(resultBody)) throw new Error("Workers AI returned an invalid response");
+    if (resultBody?.success === false) throw new Error("Workers AI returned an unsuccessful response");
+    const providerResult = resultBody.result;
+    const generated = isRecord(providerResult) ? providerResult.response ?? providerResult : providerResult;
+    const parsed: unknown = typeof generated === "string" ? JSON.parse(generated) : generated;
+    if (!isRecord(parsed)) throw new Error("Invalid JSON response");
     if (task === "estimate-meal") {
       for (const key of ["calories", "protein", "carbs", "fats", "fiber"]) {
-        if (!Number.isFinite(Number(parsed[key])) || Number(parsed[key]) < 0) throw new Error("Invalid nutrition values");
+        if (!isNutritionValue(parsed[key])) throw new Error("Invalid nutrition values");
       }
+      if (typeof parsed.name !== "string" || !parsed.name.trim() || parsed.name.length > 180) throw new Error("Invalid meal name");
       return respond({ estimate: parsed });
     }
     if (task === "generate-meals") {
-      if (typeof parsed.label !== "string" || !Array.isArray(parsed.meals) || parsed.meals.length < 3 || parsed.meals.length > 5) throw new Error("Invalid meal plan shape");
+      if (typeof parsed.label !== "string" || !parsed.label.trim() || parsed.label.length > 120
+        || !Array.isArray(parsed.meals) || parsed.meals.length < 3 || parsed.meals.length > 5) throw new Error("Invalid meal plan shape");
       for (const meal of parsed.meals) {
-        if (typeof meal.name !== "string" || typeof meal.mealType !== "string" || typeof meal.portion !== "string") throw new Error("Invalid meal details");
-        for (const key of ["calories", "protein", "carbs", "fats", "fiber"]) if (!Number.isFinite(Number(meal[key])) || Number(meal[key]) < 0) throw new Error("Invalid meal macros");
+        if (!isRecord(meal) || typeof meal.name !== "string" || !meal.name.trim() || meal.name.length > 180
+          || typeof meal.mealType !== "string" || !meal.mealType.trim() || meal.mealType.length > 40
+          || typeof meal.portion !== "string" || !meal.portion.trim() || meal.portion.length > 200
+          || typeof meal.preparation !== "string" || meal.preparation.length > 500) throw new Error("Invalid meal details");
+        for (const key of ["calories", "protein", "carbs", "fats", "fiber"]) if (!isNutritionValue(meal[key])) throw new Error("Invalid meal macros");
       }
       return respond({ mealPlan: parsed });
     }
-    if (typeof parsed.label !== "string" || !Array.isArray(parsed.days)) throw new Error("Invalid plan shape");
-    const expectedDays = Number((await supabase.from("profiles").select("training_days_per_week").eq("id", userData.user.id).single()).data?.training_days_per_week);
-    if (parsed.days.length !== expectedDays || parsed.days.some((day: any) => typeof day.name !== "string" || !Array.isArray(day.exercises) || day.exercises.length < 3 || day.exercises.length > 8)) {
+    if (typeof parsed.label !== "string" || !parsed.label.trim() || parsed.label.length > 120 || !Array.isArray(parsed.days)) {
+      throw new Error("Invalid plan shape");
+    }
+    const { data: savedProfile, error: savedProfileError } = await supabase.from("profiles")
+      .select("training_days_per_week").eq("id", userData.user.id).single();
+    if (savedProfileError || !savedProfile) throw new Error("Could not verify the saved training schedule");
+    const expectedDays = Number(savedProfile.training_days_per_week);
+    if (parsed.days.length !== expectedDays || parsed.days.some((day: unknown) => {
+      if (!isRecord(day) || typeof day.name !== "string" || !day.name.trim() || day.name.length > 80
+        || typeof day.focus !== "string" || day.focus.length > 300 || !Array.isArray(day.exercises)
+        || day.exercises.length < 3 || day.exercises.length > 8) return true;
+      return day.exercises.some((exercise: unknown) =>
+        !isRecord(exercise) || typeof exercise.name !== "string" || !exercise.name.trim() || exercise.name.length > 120
+        || typeof exercise.muscle !== "string" || exercise.muscle.length > 60
+        || typeof exercise.equipment !== "string" || exercise.equipment.length > 60
+        || typeof exercise.repRange !== "string" || exercise.repRange.length > 30
+        || !Number.isInteger(exercise.sets) || Number(exercise.sets) < 2 || Number(exercise.sets) > 4
+      );
+    })) {
       throw new Error("The generated plan did not match the saved training schedule");
     }
     return respond({ plan: parsed });

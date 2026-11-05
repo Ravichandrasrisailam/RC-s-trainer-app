@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { isFitnessProfile, isMealPlan, isStepCount, isWeightKg, isWorkoutPlan, isWorkoutSet } from "./lib/validation";
 
 const tokenKey = "rc_access_token";
 const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -29,26 +30,31 @@ async function invokeAI(body) {
 async function currentUser() {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;
+  if (!data.user) throw new Error("Your session has expired. Please sign in again.");
   return data.user;
 }
 
 function profileFromRow(row, user) {
-  const [firstName = "Athlete", ...rest] = (user?.user_metadata?.full_name || row?.name || "Athlete").split(" ");
-  return {
+  const [metadataFirstName = "", ...metadataRest] = (user?.user_metadata?.full_name || "").split(" ");
+  const [firstName = metadataFirstName, ...rest] = (row?.name || "").split(" ");
+  const profile = {
     id: row?.id || user?.id,
-    firstName: user?.user_metadata?.first_name || firstName,
-    lastName: user?.user_metadata?.last_name || rest.join(" "),
+    firstName: firstName || user?.user_metadata?.first_name || "",
+    lastName: rest.join(" ") || user?.user_metadata?.last_name || metadataRest.join(" "),
     email: user?.email || row?.email || "",
-    heightCm: Number(row?.height_cm ?? 175),
-    weightKg: Number(row?.weight_kg ?? 70),
-    goal: row?.goal || "RECOMPOSITION",
-    activityLevel: row?.activity_level || "MODERATE",
-    trainingDaysPerWeek: Number(row?.training_days_per_week ?? 3),
-    stepTarget: Number(row?.steps_target ?? 10000),
-    proteinTarget: Number(row?.protein_target_g ?? 120),
-    proteinTargetG: Number(row?.protein_target_g ?? 120),
-    hasOnboarded: Boolean(row?.has_onboarded)
+    heightCm: row?.height_cm == null ? "" : Number(row.height_cm),
+    weightKg: row?.weight_kg == null ? "" : Number(row.weight_kg),
+    goal: row?.goal || "",
+    activityLevel: row?.activity_level || "",
+    trainingDaysPerWeek: row?.training_days_per_week == null ? "" : Number(row.training_days_per_week),
+    stepTarget: row?.steps_target == null ? "" : Number(row.steps_target),
+    proteinTarget: row?.protein_target_g == null ? "" : Number(row.protein_target_g),
+    proteinTargetG: row?.protein_target_g == null ? "" : Number(row.protein_target_g),
+    caloriesTarget: row?.calories_target == null ? "" : Number(row.calories_target),
+    hasOnboarded: false
   };
+  profile.hasOnboarded = Boolean(row?.has_onboarded && isFitnessProfile(profile));
+  return profile;
 }
 
 export const api = {
@@ -79,18 +85,20 @@ export const api = {
   },
 
   saveProfile: async (profile) => {
+    if (!isFitnessProfile(profile)) throw new Error("Please check the profile values and try again.");
     const user = await currentUser();
     const payload = {
       id: user.id,
       email: user.email,
-      name: [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "Athlete",
+      name: [profile.firstName, profile.lastName].join(" "),
       height_cm: Number(profile.heightCm),
       weight_kg: Number(profile.weightKg),
       goal: profile.goal,
       activity_level: profile.activityLevel,
       training_days_per_week: Number(profile.trainingDaysPerWeek),
       steps_target: Number(profile.stepTarget),
-      protein_target_g: Number(profile.proteinTarget || profile.proteinTargetG || 120),
+      protein_target_g: Number(profile.proteinTargetG ?? profile.proteinTarget),
+      calories_target: Number(profile.caloriesTarget),
       has_onboarded: true
     };
     const { data, error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" }).select().single();
@@ -99,16 +107,26 @@ export const api = {
   },
 
   logMeal: async (meal) => {
+    const title = meal.name || meal.title || "Meal";
+    const nutrition = ["calories", "protein", "carbs", "fats", "fiber"].map(key => Number(meal[key] || 0));
+    if (typeof title !== "string" || !title.trim() || title.length > 180
+      || nutrition.some(value => !Number.isFinite(value) || value < 0 || value > 999999.99)) {
+      throw new Error("Meal details and nutrition values are invalid.");
+    }
+    const mealType = meal.mealType || meal.meal_type || "Meal";
+    if (typeof mealType !== "string" || !mealType.trim() || mealType.length > 40) {
+      throw new Error("Meal type is invalid.");
+    }
     const user = await currentUser();
     const payload = {
       user_id: user.id,
-      title: meal.name || meal.title || "Meal",
-      calories: Number(meal.calories || 0),
-      protein: Number(meal.protein || 0),
-      carbs: Number(meal.carbs || 0),
-      fats: Number(meal.fats || 0),
-      fiber: Number(meal.fiber || 0),
-      meal_type: meal.mealType || meal.meal_type || "Snack"
+      title: title.trim(),
+      calories: nutrition[0],
+      protein: nutrition[1],
+      carbs: nutrition[2],
+      fats: nutrition[3],
+      fiber: nutrition[4],
+      meal_type: mealType.trim()
     };
     const { data, error } = await supabase.from("meal_logs").insert(payload).select().single();
     if (error) throw error;
@@ -140,7 +158,7 @@ export const api = {
     return { meals, steps: Number(stepResult.data?.steps || 0), history, weight: history.at(-1)?.weight };
   },
 
-  getOrGenerateWorkoutPlan: async (profile) => {
+  getOrGenerateWorkoutPlan: async (profile, { force = false } = {}) => {
     const user = await currentUser();
     const snapshot = {
       goal: profile.goal, activityLevel: profile.activityLevel,
@@ -150,9 +168,10 @@ export const api = {
     const { data: cached, error: cacheError } = await supabase.from("ai_workout_plans")
       .select("plan,profile_snapshot").eq("user_id", user.id).maybeSingle();
     if (cacheError) throw cacheError;
-    if (cached && Object.entries(snapshot).every(([key, value]) => cached.profile_snapshot?.[key] === value)) return { ...cached.plan, aiGenerated: true };
+    if (!force && cached && Object.entries(snapshot).every(([key, value]) => cached.profile_snapshot?.[key] === value)
+      && isWorkoutPlan(cached.plan, snapshot.trainingDaysPerWeek)) return { ...cached.plan, aiGenerated: true };
     const data = await invokeAI({ task: "generate-workout" });
-    if (!data?.plan || data.plan.days?.length !== snapshot.trainingDaysPerWeek || !data.plan.days.every(day => Array.isArray(day.exercises))) {
+    if (!isWorkoutPlan(data?.plan, snapshot.trainingDaysPerWeek)) {
       throw new Error("The AI returned an incomplete workout plan. Please try again.");
     }
     const { error: saveError } = await supabase.from("ai_workout_plans").upsert({
@@ -163,21 +182,22 @@ export const api = {
     return { ...data.plan, aiGenerated: true };
   },
 
-  getOrGenerateMealPlan: async (profile) => {
+  getOrGenerateMealPlan: async (profile, { force = false } = {}) => {
     const user = await currentUser();
     const snapshot = {
       goal: profile.goal, activityLevel: profile.activityLevel,
       trainingDaysPerWeek: Number(profile.trainingDaysPerWeek), heightCm: Number(profile.heightCm),
-      weightKg: Number(profile.weightKg), proteinTarget: Number(profile.proteinTargetG ?? profile.proteinTarget)
+      weightKg: Number(profile.weightKg), proteinTarget: Number(profile.proteinTargetG ?? profile.proteinTarget),
+      caloriesTarget: Number(profile.caloriesTarget)
     };
     const { data: cached, error } = await supabase.from("ai_meal_plans")
       .select("meal_plan,profile_snapshot,generated_at").eq("user_id", user.id).maybeSingle();
     if (error) throw error;
     const sameProfile = cached && Object.entries(snapshot).every(([key, value]) => cached.profile_snapshot?.[key] === value);
     const generatedToday = cached && new Date(cached.generated_at).toDateString() === new Date().toDateString();
-    if (sameProfile && generatedToday) return cached.meal_plan;
+    if (!force && sameProfile && generatedToday && isMealPlan(cached.meal_plan)) return cached.meal_plan;
     const data = await invokeAI({ task: "generate-meals" });
-    if (!Array.isArray(data?.mealPlan?.meals) || data.mealPlan.meals.length < 3) throw new Error("The AI returned an incomplete meal plan.");
+    if (!isMealPlan(data?.mealPlan)) throw new Error("The AI returned an incomplete meal plan.");
     const { error: saveError } = await supabase.from("ai_meal_plans").upsert({
       user_id: user.id, profile_snapshot: snapshot, meal_plan: data.mealPlan,
       generated_at: new Date().toISOString()
@@ -187,12 +207,16 @@ export const api = {
   },
 
   estimateMeal: async (description) => {
+    if (typeof description !== "string" || !description.trim() || description.length > 500) {
+      throw new Error("Describe the meal in 1 to 500 characters.");
+    }
     const data = await invokeAI({ task: "estimate-meal", description });
     if (!data?.estimate || !Number.isFinite(Number(data.estimate.calories))) throw new Error("AI nutrition estimate was invalid.");
     return { ...data.estimate, name: data.estimate.name || description, mealType: "Meal", fiber: Number(data.estimate.fiber || 0) };
   },
 
   logWeight: async (weightKg) => {
+    if (!isWeightKg(weightKg)) throw new Error("Weight must be between 30 and 300 kg.");
     const user = await currentUser();
     const { data, error } = await supabase.from("weight_logs").insert({ user_id: user.id, weight_kg: Number(weightKg) }).select().single();
     if (error) throw error;
@@ -200,19 +224,24 @@ export const api = {
   },
 
   logSteps: async (steps) => {
+    if (!isStepCount(steps)) throw new Error("Steps must be a whole number between 0 and 100,000.");
     const user = await currentUser();
     const { data, error } = await supabase.from("step_logs").upsert({ user_id: user.id, steps: Number(steps), log_date: localDate() }, { onConflict: "user_id,log_date" }).select().single();
     if (error) throw error;
     return data;
   },
 
-  logWorkoutSet: async (exercise, weight, reps) => {
+  logWorkoutSet: async (exercise, day, weight, reps) => {
+    if (!isWorkoutSet({ weight, reps })) throw new Error("Enter a valid set: load 0–1,500 kg and 1–100 whole reps.");
+    if (typeof exercise !== "string" || !exercise.trim() || exercise.length > 120) throw new Error("Exercise name is invalid.");
+    if (typeof day !== "string" || !day.trim() || day.length > 80) throw new Error("Workout day is invalid.");
     const user = await currentUser();
-    const { data, error } = await supabase.from("workout_completions").insert({
+    const { data, error } = await supabase.from("workout_set_logs").insert({
       user_id: user.id,
-      workout_id: exercise,
-      workout_title: `${exercise} · ${weight}kg × ${reps} reps`,
-      calories_burned: 0
+      workout_day: day.trim(),
+      exercise_name: exercise.trim(),
+      load_kg: Number(weight),
+      reps: Number(reps)
     }).select().single();
     if (error) throw error;
     return data;
