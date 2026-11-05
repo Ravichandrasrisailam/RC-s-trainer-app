@@ -15,7 +15,6 @@ export default function TrainingPage({ days, setDays, onDaysChange, plan, active
   }
 
   const selectedDay = plan.days[activeDay % plan.days.length];
-  const dayName = typeof selectedDay === "string" ? selectedDay : selectedDay.name;
   const exercises = typeof selectedDay === "string" ? plan.exercises : selectedDay.exercises;
 
   return <div className="content">
