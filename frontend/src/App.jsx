@@ -81,7 +81,7 @@ export default function App() {
       setProfile(updated); setDays(updated.trainingDaysPerWeek); setOnboarded(true);
       setGeneratedPlan(null);
       try { setGeneratedPlan(await api.getOrGenerateWorkoutPlan(updated)); setToast("Profile saved and your personalized plan is ready."); }
-      catch { setToast("Profile saved. AI plan generation needs GEMINI_API_KEY in Supabase Edge Function secrets."); }
+      catch { setToast("Profile saved. AI plan generation is unavailable; check the Cloudflare Workers AI secrets configured for the Supabase Edge Function."); }
     } catch (err) {
       setToast(err instanceof Error ? `Profile was not saved: ${err.message}` : "Profile could not be saved.");
     }
