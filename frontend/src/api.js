@@ -1,6 +1,7 @@
 import { supabase } from "./supabaseClient";
 
 const tokenKey = "rc_access_token";
+const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
 export function saveToken(token) {
   if (token) localStorage.setItem(tokenKey, token);
@@ -110,7 +111,7 @@ export const api = {
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-    const today = new Date(now.getFullYear() - 0, now.getMonth(), now.getDate()).toISOString().slice(0, 10);
+    const today = localDate(now);
     const [mealResult, stepResult, weightResult] = await Promise.all([
       supabase.from("meal_logs").select("*").eq("user_id", user.id).gte("logged_at", start).lt("logged_at", tomorrow).order("logged_at", { ascending: false }),
       supabase.from("step_logs").select("*").eq("user_id", user.id).eq("log_date", today).maybeSingle(),
@@ -140,7 +141,7 @@ export const api = {
       .select("plan,profile_snapshot").eq("user_id", user.id).maybeSingle();
     if (cacheError) throw cacheError;
     if (cached && JSON.stringify(cached.profile_snapshot) === JSON.stringify(snapshot)) return cached.plan;
-    const { data, error } = await supabase.functions.invoke("generate-plan", { body: { profile: snapshot } });
+    const { data, error } = await supabase.functions.invoke("generate-plan", { body: { task: "generate-workout" } });
     if (error) throw error;
     if (!data?.plan || data.plan.days?.length !== snapshot.trainingDaysPerWeek || !Array.isArray(data.plan.exercises)) {
       throw new Error("The AI returned an incomplete workout plan. Please try again.");
@@ -169,7 +170,7 @@ export const api = {
 
   logSteps: async (steps) => {
     const user = await currentUser();
-    const { data, error } = await supabase.from("step_logs").upsert({ user_id: user.id, steps: Number(steps), log_date: new Date().toISOString().slice(0, 10) }, { onConflict: "user_id,log_date" }).select().single();
+    const { data, error } = await supabase.from("step_logs").upsert({ user_id: user.id, steps: Number(steps), log_date: localDate() }, { onConflict: "user_id,log_date" }).select().single();
     if (error) throw error;
     return data;
   },
