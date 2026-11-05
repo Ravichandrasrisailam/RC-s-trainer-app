@@ -24,6 +24,7 @@ export function isFitnessProfile(profile) {
   const stepTarget = Number(profile.stepTarget);
   const proteinTarget = Number(profile.proteinTargetG ?? profile.proteinTarget);
   const caloriesTarget = Number(profile.caloriesTarget);
+  const hasTargetWeight = profile.targetWeightKg != null && profile.targetWeightKg !== "";
 
   return typeof profile.firstName === "string" && profile.firstName.trim().length > 0
     && profile.firstName.length <= 80
@@ -36,7 +37,8 @@ export function isFitnessProfile(profile) {
     && Number.isSafeInteger(trainingDays) && trainingDays >= 3 && trainingDays <= 6
     && Number.isSafeInteger(stepTarget) && stepTarget >= 1000 && stepTarget <= 30000
     && Number.isFinite(proteinTarget) && proteinTarget >= 20 && proteinTarget <= 400
-    && Number.isSafeInteger(caloriesTarget) && caloriesTarget >= 500 && caloriesTarget <= 10000;
+    && Number.isSafeInteger(caloriesTarget) && caloriesTarget >= 500 && caloriesTarget <= 10000
+    && (!hasTargetWeight || isWeightKg(profile.targetWeightKg));
 }
 
 export function isMealPlan(plan) {

@@ -14,16 +14,16 @@ The current intended product path is a static React frontend on Vercel that uses
 1. The Vercel Production site was last observed serving the older UI. The latest intended frontend has not been promoted to Production.
 2. The current Preview is associated with PR #5 and its pushed branch commit. It does **not** contain the additional staged, unstaged, and untracked work currently in this local checkout.
 3. The PR description reports successful AI-generation UAT on its Preview, but this review did not independently repeat all authenticated writes and reload-persistence flows.
-4. The database migration was run through the Supabase Dashboard SQL editor. Confirm migration-history state and reconcile it with the checked-in migration files before relying on future automated `supabase db push` runs.
+4. The approved weight-history migration was applied to the Supabase project and verified. Migration history now includes all four checked-in migration versions; the six pre-existing history rows were preserved.
 5. The standalone Spring API has not been deployed and is not part of the current Vercel/Supabase release path.
 
 ## Current release and repository state
 
 | Area | Current status | Evidence / qualification |
 |---|---|---|
-| Frontend source | Updated locally | Profile-driven AI plan behavior and empty states are in the local working tree. |
-| Local frontend checks | Passed | `npm test` reports 6 passing tests; `npm run build` succeeds. |
-| Supabase schema | Applied to `inktrhlrcelzcqecpltt` | Dashboard verification found the app tables, target columns without defaults, numeric meal calories, and user-scoped policies. The project dashboard labels this project **Production**. |
+| Frontend source | Updated locally | Profile-driven AI plan behavior, persistence fixes, and empty states are in the local working tree. Step C changes are not yet pushed. |
+| Local frontend checks | Passed | `npm test` reports 9 passing tests; `npm run build` succeeds for the current Step C working tree. |
+| Supabase schema | Applied to `inktrhlrcelzcqecpltt` | The approved daily-weight migration is applied; logged-on uniqueness, profile target nullability, and user-scoped update policy were verified. The project dashboard labels this project **Production**. |
 | Supabase AI function | Deployed to `inktrhlrcelzcqecpltt` | Dashboard reported successful update; the deployed source was previously compared against the local function source. |
 | Vercel Preview | Reachable | The Preview URL is [the PR branch Preview](https://rc-s-trainer-app-git-codex-fix-data-ai-gaps-rc-7e0c.vercel.app/). The signed-in dashboard was visible during this review. |
 | PR #5 | Open, not merged | [Fix persistence and add personalized AI meal/workout plans](https://github.com/Ravichandrasrisailam/RC-s-trainer-app/pull/5) targets `main`. |
@@ -33,7 +33,7 @@ The current intended product path is a static React frontend on Vercel that uses
 
 ### Local checkout warning
 
-The local branch HEAD was `45741f8` (`Fix outdated AI setup message`), matching `origin/codex/fix-data-ai-gaps` when checked. There are additional staged/unstaged tracked changes and untracked files in the working tree. Therefore, the code currently tested locally is not necessarily the code in the pushed branch or the deployed Preview.
+The local branch now includes checkpoint commit `255bc104` and Step B migration commit `883f1bf`; the latest Step C frontend changes remain uncommitted and are not pushed. The current Preview is therefore not the Step C code tested locally.
 
 Before creating or pushing a release commit:
 
@@ -69,11 +69,14 @@ The frontend’s active data path is Supabase directly. Deploying the Spring API
 - React 19/Vite app with Overview, Meals, Workouts, Progress, and Profile screens.
 - Email/password sign-up and sign-in using Supabase Auth; the Supabase client persists and refreshes the session.
 - New profile values start blank rather than being populated with demo fitness values.
-- Onboarding/profile validation requires user-entered height, weight, goal, activity level, training days, steps, protein, and calories.
+- Onboarding/profile validation requires user-entered height, weight, goal, activity level, training days, steps, protein, and calories; target weight is optional.
 - Meals and workouts use validated AI-generated plans; the current local code does not substitute sample plans when generation is unavailable.
 - Meal and workout plans are cached per user in Supabase with a profile snapshot; a plan can be regenerated.
 - Meal estimates are requested from the Edge Function and meal entries are persisted.
-- Step, weight, and individual workout-set entries are persisted as user-owned records.
+- Step, weight, and individual workout-set entries are persisted as user-owned records. Weight logs upsert once per user/local day.
+- Recent workout sets load per user and appear beside each matching exercise.
+- Missing steps remain `null` and display “No steps logged yet”; saved UI state changes only after the database write succeeds.
+- Dashboard weight progress uses the earliest weight log and optional saved target; without a target it shows the change since the first log.
 - Dashboard and progress displays use loaded activity and profile targets, with empty states where data is missing.
 - Error messages are surfaced for profile loading/saving and AI/logging failures.
 
@@ -86,8 +89,9 @@ Tracked migrations are:
 - `supabase/migrations/202611050001_ai_workout_plans.sql`
 - `supabase/migrations/202611050002_ai_meal_plans.sql`
 - `supabase/migrations/202611050003_app_data_and_ai_limits.sql`
+- `supabase/migrations/202611050004_weight_daily.sql`
 
-The app schema covers profiles, meal logs, daily steps, weight logs, workout completions, workout-set logs, cached AI plans, and AI-generation limits. RLS policies are intended to restrict app rows to the authenticated owner. The latest migration removes database defaults from user-entered profile fields while preserving existing rows.
+The app schema covers profiles, meal logs, daily steps, weight logs, workout completions, workout-set logs, cached AI plans, and AI-generation limits. RLS policies are intended to restrict app rows to the authenticated owner. The migrations remove database defaults from user-entered profile fields while preserving existing rows. Migration 004 adds `weight_logs.logged_on`, daily uniqueness, a nullable target weight, and an owner-scoped update policy.
 
 Dashboard verification after the authorized migration reported:
 
@@ -95,7 +99,9 @@ Dashboard verification after the authorized migration reported:
 - Required profile targets no longer had database defaults.
 - Meal calories had a numeric type.
 - User-scoped policies were present.
-- Existing user data was not wiped.
+- Existing user data was preserved except for the approved cleanup: two older duplicate weight rows for one user/day were removed, retaining the latest row, and two legacy `target_weight_kg = 70` values were cleared to NULL.
+- After migration 004: `logged_on` is non-null, `(user_id, logged_on)` is unique, no daily duplicates or null dates remain, the update policy is present, and target weight is nullable with no default.
+- `schema_migrations` contained six pre-existing rows. The four checked-in migration versions `202611050001`–`202611050004` were registered after checking the corresponding tables, policies, function, constraint, and data. The six older records were preserved.
 
 **Important:** Removing a column default does not erase values already stored in existing profile rows. Any old sample/default-like values already persisted must be reviewed or corrected as user data; the migration did not delete them.
 
@@ -148,7 +154,7 @@ If the Java service is intentionally out of scope, label it as a future/legacy c
    - A second test account cannot read or modify the first account’s records (RLS isolation).
    - Mobile layout and navigation.
 4. **Promote only after the Preview gates pass.** Confirm Vercel Production’s `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` point to the intended Supabase project. These are build-time variables; redeploy after changes. Keep Cloudflare credentials exclusively in Supabase Edge Function secrets.
-5. **Reconcile Supabase migration tracking.** The database changes were applied through the dashboard SQL editor. Check `supabase_migrations.schema_migrations` against all three migration files and determine whether any are absent from migration history before running automated migration commands. Do not blindly reapply or mark migrations applied without verifying the actual schema and intended state.
+5. **Keep migration tracking aligned.** Migration history was reconciled after read-only schema verification; do not blindly reapply migrations or remove the six pre-existing history rows.
 6. **Create and rehearse a rollback path.** Record the Vercel rollback target and database/function rollback approach. Database rollback may require a forward corrective migration or backup restore; do not assume the DDL is automatically reversible.
 
 ### P1 — Required before a broad public launch
@@ -165,17 +171,18 @@ If the Java service is intentionally out of scope, label it as a future/legacy c
 
 - Ensure the PR’s frontend test/build workflow actually appears and passes on GitHub after the latest code is pushed. The last PR check query showed only the Vercel Preview Comments check.
 - Decide whether to retain, finish, or formally de-scope the separate Spring API.
-- Add automated integration/E2E coverage for Supabase auth, RLS, Edge Function behavior, and persistence; the current six frontend tests primarily cover local validation.
+- Add automated integration/E2E coverage for Supabase auth, RLS, Edge Function behavior, and persistence; the current nine frontend tests cover local validation and activity calculations.
 - Keep deployment instructions, migration history, and Preview/Production environment notes synchronized with actual dashboard settings.
 
 ## Verification record
 
 | Check | Result | Scope |
 |---|---|---|
-| Frontend unit tests | Pass — 6 tests | Local working tree; `npm test` in `frontend/`. |
+| Frontend unit tests | Pass — 9 tests | Local Step C working tree; `npm test` in `frontend/`. |
 | Frontend production build | Pass | Local working tree; `npm run build` in `frontend/`. |
 | `git diff --check` | Pass | Local working tree at the last check. |
-| Supabase schema/policy verification | Reported pass | Project `inktrhlrcelzcqecpltt`; existing rows preserved. |
+| Supabase schema/policy verification | Pass | Project `inktrhlrcelzcqecpltt`; migration 004 data, constraint, and policy checks passed. |
+| Supabase migration-history reconciliation | Pass | Six earlier records preserved; four local migration versions recorded after schema checks. |
 | Edge Function deployment | Reported successful | Supabase dashboard confirmed deployment. |
 | Vercel Preview dashboard | Reachable and signed in | Dashboard view only in this handoff review; not a full CRUD/UAT run. |
 | AI-generation UAT | Reported by PR description | PR #5 states meal/workout generation succeeded on its Preview after validation/retry fixes; independently repeat against a fresh Preview built from the current local changes. |
@@ -186,8 +193,7 @@ If the Java service is intentionally out of scope, label it as a future/legacy c
 ## Recommended next sequence
 
 1. Review `git status`, staged diff, unstaged diff, and untracked files.
-2. Reconcile Supabase migration history and confirm the current Production-labeled project remains the intended backend for this release.
-3. Commit and push only the reviewed implementation and release documentation to PR #5.
+2. Commit and push the Step C and Step D changes and release documentation to PR #5.
 4. Confirm the GitHub test/build workflow runs and the new Vercel Preview builds from that exact commit.
 5. Run and record the authenticated UAT checklist above without using real user data as test data.
 6. Fix any failures and repeat the Preview checks.

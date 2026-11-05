@@ -1,8 +1,8 @@
 import { supabase } from "./supabaseClient";
+import { buildWeightLogUpsert, localDateString, stepsFromRow } from "./lib/activity";
 import { isFitnessProfile, isMealPlan, isStepCount, isWeightKg, isWorkoutPlan, isWorkoutSet } from "./lib/validation";
 
 const tokenKey = "rc_access_token";
-const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
 export function saveToken(token) {
   if (token) localStorage.setItem(tokenKey, token);
@@ -21,7 +21,13 @@ async function invokeAI(body) {
   const { data, error } = await supabase.functions.invoke("generate-plan", { body });
   if (error) {
     let detail;
-    try { detail = await error.context?.json(); } catch { /* keep the SDK error below */ }
+    if (typeof error.context?.json === "function") {
+      try {
+        detail = await error.context.json();
+      } catch (parseError) {
+        throw new Error(`AI request failed: ${error.message}. The error response was not valid JSON.`, { cause: parseError });
+      }
+    }
     throw new Error(detail?.error || error.message || "AI request failed.");
   }
   return data;
@@ -51,6 +57,7 @@ function profileFromRow(row, user) {
     proteinTarget: row?.protein_target_g == null ? "" : Number(row.protein_target_g),
     proteinTargetG: row?.protein_target_g == null ? "" : Number(row.protein_target_g),
     caloriesTarget: row?.calories_target == null ? "" : Number(row.calories_target),
+    targetWeightKg: row?.target_weight_kg == null ? "" : Number(row.target_weight_kg),
     hasOnboarded: false
   };
   profile.hasOnboarded = Boolean(row?.has_onboarded && isFitnessProfile(profile));
@@ -99,6 +106,7 @@ export const api = {
       steps_target: Number(profile.stepTarget),
       protein_target_g: Number(profile.proteinTargetG ?? profile.proteinTarget),
       calories_target: Number(profile.caloriesTarget),
+      target_weight_kg: profile.targetWeightKg == null || profile.targetWeightKg === "" ? null : Number(profile.targetWeightKg),
       has_onboarded: true
     };
     const { data, error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" }).select().single();
@@ -139,23 +147,42 @@ export const api = {
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-    const today = localDate(now);
-    const [mealResult, stepResult, weightResult] = await Promise.all([
+    const today = localDateString(now);
+    const [mealResult, stepResult, weightResult, firstWeightResult] = await Promise.all([
       supabase.from("meal_logs").select("*").eq("user_id", user.id).gte("logged_at", start).lt("logged_at", tomorrow).order("logged_at", { ascending: false }),
       supabase.from("step_logs").select("*").eq("user_id", user.id).eq("log_date", today).maybeSingle(),
-      supabase.from("weight_logs").select("*").eq("user_id", user.id).order("logged_at", { ascending: false }).limit(30)
+      supabase.from("weight_logs").select("weight_kg,logged_on,logged_at").eq("user_id", user.id).order("logged_on", { ascending: false }).limit(30),
+      supabase.from("weight_logs").select("weight_kg").eq("user_id", user.id).order("logged_on", { ascending: true }).limit(1).maybeSingle()
     ]);
-    for (const result of [mealResult, stepResult, weightResult]) if (result.error) throw result.error;
+    for (const result of [mealResult, stepResult, weightResult, firstWeightResult]) if (result.error) throw result.error;
     const meals = (mealResult.data || []).map(row => ({
       id: row.id, name: row.title, mealType: row.meal_type, calories: Number(row.calories || 0),
       protein: Number(row.protein || 0), carbs: Number(row.carbs || 0), fats: Number(row.fats || 0),
       loggedAt: new Date(row.logged_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     }));
     const history = (weightResult.data || []).slice().reverse().map(row => ({
-      day: new Date(row.logged_at).toLocaleDateString([], { month: "short", day: "numeric" }),
+      loggedOn: row.logged_on,
+      day: new Date(`${row.logged_on}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" }),
       weight: Number(row.weight_kg)
     }));
-    return { meals, steps: Number(stepResult.data?.steps || 0), history, weight: history.at(-1)?.weight };
+    return {
+      meals,
+      steps: stepsFromRow(stepResult.data),
+      history,
+      weight: history.at(-1)?.weight,
+      startWeight: firstWeightResult.data?.weight_kg == null ? null : Number(firstWeightResult.data.weight_kg)
+    };
+  },
+
+  getRecentSets: async () => {
+    const user = await currentUser();
+    const { data, error } = await supabase.from("workout_set_logs")
+      .select("id,workout_day,exercise_name,load_kg,reps,logged_at")
+      .eq("user_id", user.id)
+      .order("logged_at", { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    return data || [];
   },
 
   getOrGenerateWorkoutPlan: async (profile, { force = false } = {}) => {
@@ -218,7 +245,8 @@ export const api = {
   logWeight: async (weightKg) => {
     if (!isWeightKg(weightKg)) throw new Error("Weight must be between 30 and 300 kg.");
     const user = await currentUser();
-    const { data, error } = await supabase.from("weight_logs").insert({ user_id: user.id, weight_kg: Number(weightKg) }).select().single();
+    const { payload, options } = buildWeightLogUpsert(user.id, weightKg);
+    const { data, error } = await supabase.from("weight_logs").upsert(payload, options).select().single();
     if (error) throw error;
     return data;
   },
@@ -226,7 +254,7 @@ export const api = {
   logSteps: async (steps) => {
     if (!isStepCount(steps)) throw new Error("Steps must be a whole number between 0 and 100,000.");
     const user = await currentUser();
-    const { data, error } = await supabase.from("step_logs").upsert({ user_id: user.id, steps: Number(steps), log_date: localDate() }, { onConflict: "user_id,log_date" }).select().single();
+    const { data, error } = await supabase.from("step_logs").upsert({ user_id: user.id, steps: Number(steps), log_date: localDateString() }, { onConflict: "user_id,log_date" }).select().single();
     if (error) throw error;
     return data;
   },

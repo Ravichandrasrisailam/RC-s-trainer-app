@@ -4,6 +4,7 @@ export const emptyProfile = {
   email: "",
   heightCm: "",
   weightKg: "",
+  targetWeightKg: "",
   goal: "",
   activityLevel: "",
   trainingDaysPerWeek: "",

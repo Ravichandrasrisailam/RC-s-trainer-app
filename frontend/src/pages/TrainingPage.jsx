@@ -3,7 +3,7 @@ import { PageIntro } from "../components/ui";
 import { api } from "../api";
 import { isWorkoutSet } from "../lib/validation";
 
-export default function TrainingPage({ days, setDays, onDaysChange, plan, activeDay, workoutPlanBusy, regenerateWorkoutPlan, setActiveDay, exerciseLogs, setExerciseLogs, setToast }) {
+export default function TrainingPage({ days, setDays, onDaysChange, plan, activeDay, workoutPlanBusy, regenerateWorkoutPlan, setActiveDay, exerciseLogs, setExerciseLogs, recentSets, setRecentSets, setToast }) {
   async function saveSet(exercise, day) {
     const entry = exerciseLogs[exercise.name];
     if (!entry || !isWorkoutSet(entry)) {
@@ -11,7 +11,8 @@ export default function TrainingPage({ days, setDays, onDaysChange, plan, active
       return;
     }
     try {
-      await api.logWorkoutSet(exercise.name, day, entry.weight, entry.reps);
+      const saved = await api.logWorkoutSet(exercise.name, day, entry.weight, entry.reps);
+      setRecentSets(current => [saved, ...current.filter(item => item.id !== saved.id)].slice(0, 50));
       setExerciseLogs(current => {
         const next = { ...current };
         delete next[exercise.name];
@@ -34,7 +35,7 @@ export default function TrainingPage({ days, setDays, onDaysChange, plan, active
       <div className="split-options">{[3, 4, 5, 6].map(n => <button className={days === n ? "split-option active" : "split-option"} key={n} onClick={() => { onDaysChange ? onDaysChange(n) : setDays(n); setActiveDay(0); }}><strong>{n}</strong><span>days / week</span></button>)}</div>
       {plan ? <>
         <div className="day-tabs">{plan.days.map((day, i) => { const label = typeof day === "string" ? day : day.name; return <button className={activeDay === i ? "day-tab active" : "day-tab"} onClick={() => setActiveDay(i)} key={label}>{label}</button>; })}</div>
-        <div className="exercise-list">{(exercises || []).map((ex, i) => <div className="exercise-row" key={`${dayName}-${ex.name}`}><div className="exercise-index">{String(i + 1).padStart(2, "0")}</div><div className="exercise-info"><strong>{ex.name}</strong><span className="muted">{ex.muscle} · {ex.equipment} · {ex.sets} sets × {ex.repRange}</span></div><div className="exercise-inputs"><input aria-label={`${ex.name} weight in kg`} placeholder="kg" type="number" min="0" value={exerciseLogs[ex.name]?.weight ?? ""} onChange={e => setExerciseLogs({ ...exerciseLogs, [ex.name]: { weight: e.target.value, reps: exerciseLogs[ex.name]?.reps ?? "" } })} /><input aria-label={`${ex.name} reps`} placeholder="reps" type="number" min="1" value={exerciseLogs[ex.name]?.reps ?? ""} onChange={e => setExerciseLogs({ ...exerciseLogs, [ex.name]: { weight: exerciseLogs[ex.name]?.weight ?? "", reps: e.target.value } })} /><button className="log-set" title="Save set" onClick={() => saveSet(ex, dayName)}><Check size={16} /></button></div></div>)}</div>
+        <div className="exercise-list">{(exercises || []).map((ex, i) => { const lastSet = recentSets.find(item => item.exercise_name.toLowerCase() === ex.name.toLowerCase()); return <div className="exercise-row" key={`${dayName}-${ex.name}`}><div className="exercise-index">{String(i + 1).padStart(2, "0")}</div><div className="exercise-info"><strong>{ex.name}</strong><span className="muted">{ex.muscle} · {ex.equipment} · {ex.sets} sets × {ex.repRange}</span><span className="muted">{lastSet ? `Last logged: ${Number(lastSet.load_kg).toLocaleString()} kg × ${lastSet.reps} reps` : "No sets logged for this exercise yet."}</span></div><div className="exercise-inputs"><input aria-label={`${ex.name} weight in kg`} placeholder="kg" type="number" min="0" value={exerciseLogs[ex.name]?.weight ?? ""} onChange={e => setExerciseLogs({ ...exerciseLogs, [ex.name]: { weight: e.target.value, reps: exerciseLogs[ex.name]?.reps ?? "" } })} /><input aria-label={`${ex.name} reps`} placeholder="reps" type="number" min="1" value={exerciseLogs[ex.name]?.reps ?? ""} onChange={e => setExerciseLogs({ ...exerciseLogs, [ex.name]: { weight: exerciseLogs[ex.name]?.weight ?? "", reps: e.target.value } })} /><button className="log-set" title="Save set" onClick={() => saveSet(ex, dayName)}><Check size={16} /></button></div></div>; })}</div>
         <p className="muted helper-note"><CircleHelp size={14} /> {typeof selectedDay !== "string" && selectedDay?.focus ? `Focus: ${selectedDay.focus}. ` : ""}Saved sets are stored with your Supabase account.</p>
       </> : <div className="empty-state"><p className="muted">{workoutPlanBusy ? "Generating a workout plan from your saved profile…" : "Your workout plan is empty until you generate a personalized plan."}</p><button className="primary" disabled={workoutPlanBusy} onClick={regenerateWorkoutPlan}>{workoutPlanBusy ? "Generating…" : "Generate AI workout plan"}</button></div>}
     </section>
