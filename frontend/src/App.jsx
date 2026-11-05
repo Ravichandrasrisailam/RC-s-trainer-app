@@ -39,6 +39,8 @@ export default function App() {
   const [mealText, setMealText] = useState("");
   const [mealBusy, setMealBusy] = useState(false);
   const [mealError, setMealError] = useState("");
+  const [mealPlan, setMealPlan] = useState(null);
+  const [mealPlanBusy, setMealPlanBusy] = useState(false);
   const [steps, setSteps] = useState(0);
   const [weight, setWeight] = useState(demoProfile.weightKg);
   const [weightInput, setWeightInput] = useState(String(demoProfile.weightKg));
@@ -83,12 +85,22 @@ export default function App() {
     }
   }
   async function changeTrainingDays(nextDays) { const updated = { ...profile, trainingDaysPerWeek: nextDays }; setActiveDay(0); await saveProfile(updated); }
+  async function generateMealPlan() {
+    setMealPlanBusy(true); setMealError("");
+    try { setMealPlan(await api.getOrGenerateMealPlan(profile)); }
+    catch (err) { setMealError(err instanceof Error ? err.message : "Could not generate a meal plan."); }
+    finally { setMealPlanBusy(false); }
+  }
+  async function logPlannedMeal(meal) {
+    try { const saved = await api.logMeal({ ...meal, mealType: meal.mealType || "Meal" }); setMeals(prev => [saved, ...prev]); setToast("Suggested meal added to today’s log."); }
+    catch (err) { setToast(err instanceof Error ? `Meal was not saved: ${err.message}` : "Meal could not be saved."); }
+  }
   async function addMeal() { if (!mealText.trim()) return; setMealBusy(true); setMealError(""); try { const estimate = await api.estimateMeal(mealText); const meal = await api.logMeal({ ...estimate, mealType: "Meal" }); setMeals(prev => [...prev, meal]); setMealText(""); setToast("Meal added to today's log"); } catch (e) { setMealError(e instanceof Error ? e.message : "Could not estimate this meal. Check the API connection."); } finally { setMealBusy(false); } }
   async function addWeight() { const value = Number(weightInput); if (!Number.isFinite(value) || value < 30 || value > 300) return; try { await api.logWeight(value); setWeight(value); setHistory(prev => [...prev, { day: new Date().toLocaleDateString([], { month: "short", day: "numeric" }), weight: value }]); setToast("Weight entry saved"); } catch (err) { setToast(err instanceof Error ? `Weight was not saved: ${err.message}` : "Weight could not be saved."); } }
   if (!authenticated) return <AuthScreen onAuth={() => setAuthenticated(true)} />;
   if (profileLoading) return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">RC TRAINER</div><h1>Loading your profile.</h1><p className="muted">Preparing your dashboard and recommendations.</p></section></main>;
   if (!onboarded) return <Onboarding profile={profile} onSave={saveProfile} />;
   const pageTitle = { overview: "Your overview", nutrition: "Nutrition", training: "Training plan", progress: "Your progress", profile: "Profile" }[tab];
-  const page = { overview: <DashboardPage profile={profile} steps={steps} weight={weight} totals={totals} proteinTarget={proteinTarget} history={history} plan={plan} activeDay={activeDay} onNavigate={setTab} />, nutrition: <MealsPage meals={meals} totals={totals} proteinTarget={proteinTarget} mealText={mealText} setMealText={setMealText} mealBusy={mealBusy} mealError={mealError} addMeal={addMeal} />, training: <TrainingPage days={days} setDays={setDays} onDaysChange={changeTrainingDays} plan={plan} activeDay={activeDay} setActiveDay={setActiveDay} exerciseLogs={exerciseLogs} setExerciseLogs={setExerciseLogs} setToast={setToast} />, progress: <ProgressPage weight={weight} weightInput={weightInput} setWeightInput={setWeightInput} addWeight={addWeight} steps={steps} setSteps={setSteps} history={history} setToast={setToast} />, profile: <ProfilePage profile={profile} onSave={saveProfile} /> }[tab];
+  const page = { overview: <DashboardPage profile={profile} steps={steps} weight={weight} totals={totals} proteinTarget={proteinTarget} history={history} plan={plan} activeDay={activeDay} onNavigate={setTab} />, nutrition: <MealsPage meals={meals} totals={totals} proteinTarget={proteinTarget} mealText={mealText} setMealText={setMealText} mealBusy={mealBusy} mealError={mealError} addMeal={addMeal} mealPlan={mealPlan} mealPlanBusy={mealPlanBusy} generateMealPlan={generateMealPlan} logPlannedMeal={logPlannedMeal} />, training: <TrainingPage days={days} setDays={setDays} onDaysChange={changeTrainingDays} plan={plan} activeDay={activeDay} setActiveDay={setActiveDay} exerciseLogs={exerciseLogs} setExerciseLogs={setExerciseLogs} setToast={setToast} />, progress: <ProgressPage weight={weight} weightInput={weightInput} setWeightInput={setWeightInput} addWeight={addWeight} steps={steps} setSteps={setSteps} history={history} setToast={setToast} />, profile: <ProfilePage profile={profile} onSave={saveProfile} /> }[tab];
   return <div className="app-shell"><aside className="sidebar"><div className="brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><div className="side-label">WORKSPACE</div><nav>{nav.map(n => <button key={n.id} className={tab === n.id ? "nav-item selected" : "nav-item"} onClick={() => setTab(n.id)}><n.icon size={18} />{n.label}</button>)}</nav><div className="sidebar-bottom"><div className="profile-mini"><div className="avatar">{profile.firstName[0]}</div><div><strong>{profile.firstName} {profile.lastName}</strong><small>{profile.goal.replace("_", " ").toLowerCase()}</small></div><button className="icon-button" onClick={() => setShowProfile(!showProfile)}><ChevronDown size={16} /></button></div>{showProfile && <button className="nav-item" onClick={() => { clearToken(); setAuthenticated(false); setOnboarded(false); }}><LogOut size={17} /> Sign out</button>}</div></aside><main className="main-area"><header className="topbar"><div><span className="muted">TUESDAY, YOUR NEXT REP STARTS HERE</span><h1>{pageTitle}</h1></div><button className="date-pill"><Activity size={15} /> Today <ChevronDown size={14} /></button></header>{page}<footer className="footer"><span>RC TRAINER</span><span>Progress over perfection.</span></footer></main><nav className="mobile-nav">{nav.map(n => <button key={n.id} className={tab === n.id ? "mobile-item active" : "mobile-item"} onClick={() => setTab(n.id)}><n.icon size={19} /><span>{n.label}</span></button>)}</nav>{toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}</div>;
 }
