@@ -1,35 +1,39 @@
 # RC Trainer — Rebuild
 
-Responsive fitness tracker with a React JavaScript client and Java 21 / Spring Boot 3 API.
+Responsive fitness tracker with a React JavaScript client and a separate Java 21 / Spring Boot API.
 
 ## Stack
 - Frontend: React 19, JavaScript/JSX, Vite, Recharts, Lucide
-- Backend: Java 21, Spring Boot 3.4, Spring Security, Spring Data JPA, Hibernate, Bean Validation
-- Database/auth: Supabase Auth and PostgreSQL with row-level security; a separate local PostgreSQL/Flyway setup remains for the optional Spring API
-- Build/test: Maven, JUnit 5, Mockito
-- Seed data: Python standard library only
+- Authentication and app data: Supabase Auth and PostgreSQL with row-level security
+- AI generation: authenticated Supabase Edge Function backed by Cloudflare Workers AI (server-side secrets only)
+- Optional API: Java 21, Spring Boot 3.4, Spring Security, Spring Data JPA, Hibernate, Bean Validation
+- Build/test: npm, Maven, JUnit 5, Mockito
 
 ## Run locally
-1. Copy `.env.example` to `.env` and set values.
-2. Start PostgreSQL: `docker compose up -d postgres`
-3. Optional API only: start local PostgreSQL with Docker, set `DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and a strong `JWT_SECRET`, then run `cd backend && mvn spring-boot:run`
-4. Start web: `cd frontend && npm install && npm run dev`
+1. Copy `.env.example` to `.env` and set the frontend's Supabase URL and publishable key.
+2. Start the web app: `cd frontend && npm install && npm run dev`.
+3. Optional Java API: start local PostgreSQL with `docker compose up -d postgres`, configure `DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and a strong `JWT_SECRET`, then run `cd backend && mvn spring-boot:run`.
 
-Frontend defaults to `http://localhost:5173`; API defaults to `http://localhost:8080`.
-Set `VITE_API_BASE_URL=http://localhost:8080/api`.
+Frontend defaults to `http://localhost:5173`; optional API defaults to `http://localhost:8080`. The current web client uses Supabase directly and does not depend on the Java API.
 
-## Notes
-- Meal estimates are approximate, not medical or laboratory measurements. The web app calls the authenticated Supabase `generate-plan` Edge Function; configure `GEMINI_API_KEY` as a Supabase Edge Function secret before meal estimates and personalized workout plans can run. The key must never be exposed through a `VITE_` variable. The current client does not depend on the optional Java API.
-- Never commit real JWT secrets, database passwords, or Gemini API keys.
-- The app uses a first-pass macro target calculation based on body weight and goal.
-  Activity level and training frequency are now persisted in the fitness profile and are ready to drive generated plans.
-- Steps are manually entered in this baseline. Health-platform integrations are a separate phase.
+## AI setup
+Meal estimates and personalized meal/workout plans call the authenticated Supabase `generate-plan` Edge Function. Configure these as Supabase Edge Function secrets (never in Vite variables or Git):
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN` (scope it to Workers AI only)
+- Optional `CLOUDFLARE_AI_MODEL`; default is `@cf/meta/llama-3.1-8b-instruct`
+
+Workers AI publishes a daily free allocation of 10,000 Neurons. Requests fail closed when the free allocation is exhausted; they do not automatically opt the account into a paid plan. Free allocation and supported models can change; verify current provider terms before launch. See [Cloudflare Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/) and [JSON mode documentation](https://developers.cloudflare.com/workers-ai/features/json-mode/).
+
+Generated nutrition is approximate and not medical advice. The function derives personalization from the signed-in user's saved profile, validates the generated response, and keeps the provider token server-side.
+
+## Data and deployment
+- User-specific meal plans, workout plans, steps, weight, and activity records are persisted in Supabase and protected by row-level security.
+- Vercel Preview should have `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` configured for Preview; production values remain separately scoped.
+- OAuth provider setup is managed in Supabase Authentication. Configure the provider's client credentials and allowed redirect URLs in Supabase; do not commit credentials.
+- The separate Spring API still uses its local PostgreSQL/Flyway schema and is not the current frontend data path.
 
 ## Current application structure
 - `frontend/src/pages`: dashboard, meals, workouts, progress, and profile screens.
 - `frontend/src/components`: shared UI primitives used by all screens.
 - `backend/src/main/resources/db/migration`: versioned PostgreSQL/Flyway schema changes.
-- `V2__profile_training_preferences.sql` adds activity level and training days per week.
-
-## AI and OAuth rollout
-The backend remains the only place that should call an LLM. The next integration should add a provider-backed plan generation service that receives the persisted profile and returns validated meal/workout JSON before saving it. OAuth also needs the Supabase project URL/keys (or an OAuth provider client ID/secret) before it can be enabled safely in development and Vercel.
