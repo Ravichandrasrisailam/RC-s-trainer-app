@@ -140,10 +140,10 @@ export const api = {
     const { data: cached, error: cacheError } = await supabase.from("ai_workout_plans")
       .select("plan,profile_snapshot").eq("user_id", user.id).maybeSingle();
     if (cacheError) throw cacheError;
-    if (cached && JSON.stringify(cached.profile_snapshot) === JSON.stringify(snapshot)) return { ...cached.plan, aiGenerated: true };
+    if (cached && Object.entries(snapshot).every(([key, value]) => cached.profile_snapshot?.[key] === value)) return { ...cached.plan, aiGenerated: true };
     const { data, error } = await supabase.functions.invoke("generate-plan", { body: { task: "generate-workout" } });
     if (error) throw error;
-    if (!data?.plan || data.plan.days?.length !== snapshot.trainingDaysPerWeek || !Array.isArray(data.plan.exercises)) {
+    if (!data?.plan || data.plan.days?.length !== snapshot.trainingDaysPerWeek || !data.plan.days.every(day => Array.isArray(day.exercises))) {
       throw new Error("The AI returned an incomplete workout plan. Please try again.");
     }
     const { error: saveError } = await supabase.from("ai_workout_plans").upsert({
