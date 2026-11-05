@@ -5,21 +5,21 @@ Responsive fitness tracker with a React JavaScript client and Java 21 / Spring B
 ## Stack
 - Frontend: React 19, JavaScript/JSX, Vite, Recharts, Lucide
 - Backend: Java 21, Spring Boot 3.4, Spring Security, Spring Data JPA, Hibernate, Bean Validation
-- Database: PostgreSQL, Flyway migrations
+- Database/auth: Supabase Auth and PostgreSQL with row-level security; a separate local PostgreSQL/Flyway setup remains for the optional Spring API
 - Build/test: Maven, JUnit 5, Mockito
 - Seed data: Python standard library only
 
 ## Run locally
 1. Copy `.env.example` to `.env` and set values.
 2. Start PostgreSQL: `docker compose up -d postgres`
-3. Start API: `cd backend && mvn spring-boot:run`
+3. Optional API only: start local PostgreSQL with Docker, set `DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and a strong `JWT_SECRET`, then run `cd backend && mvn spring-boot:run`
 4. Start web: `cd frontend && npm install && npm run dev`
 
 Frontend defaults to `http://localhost:5173`; API defaults to `http://localhost:8080`.
 Set `VITE_API_BASE_URL=http://localhost:8080/api`.
 
 ## Notes
-- Meal estimates are estimates, not medical or laboratory measurements. Gemini is called by the Spring Boot service when `GEMINI_API_KEY` is configured. A small local food reference fallback is used when the provider is not configured or unavailable; it clearly labels estimates and does not infer portion sizes.
+- Meal estimates are approximate, not medical or laboratory measurements. The web app calls the authenticated Supabase `generate-plan` Edge Function; configure `GEMINI_API_KEY` as a Supabase Edge Function secret before meal estimates and personalized workout plans can run. The key must never be exposed through a `VITE_` variable. The current client does not depend on the optional Java API.
 - Never commit real JWT secrets, database passwords, or Gemini API keys.
 - The app uses a first-pass macro target calculation based on body weight and goal.
   Activity level and training frequency are now persisted in the fitness profile and are ready to drive generated plans.
