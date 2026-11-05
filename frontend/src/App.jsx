@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Activity, Apple, BarChart3, ChevronDown, Dumbbell, Home, LogOut } from "lucide-react";
 import { api } from "./api";
 import { emptyProfile } from "./data";
+import { authErrorMessage } from "./lib/auth";
 import { isStepCount, isWeightKg } from "./lib/validation";
 import { supabase } from "./supabaseClient";
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
@@ -31,7 +32,8 @@ function AuthScreen({ initialError = "" }) {
         await api.login(form.email, form.password);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to complete the request. Please try again.");
+      const action = mode === "register" ? "create your account" : mode === "reset" ? "request a password reset" : "sign in";
+      setError(authErrorMessage(err, action));
     } finally {
       setBusy(false);
     }
@@ -85,7 +87,7 @@ function PasswordRecoveryScreen({ onComplete }) {
       await api.updatePassword(password);
       onComplete();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Password could not be updated.");
+      setError(authErrorMessage(err, "update your password"));
     } finally {
       setBusy(false);
     }

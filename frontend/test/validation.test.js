@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyProfile } from "../src/data.js";
+import { authErrorMessage } from "../src/lib/auth.js";
 import { buildWeightLogUpsert, calculateWeightProgress, formatSteps, stepsFromRow } from "../src/lib/activity.js";
 import { isFitnessProfile, isMealPlan, isStepCount, isWeightKg, isWorkoutPlan, isWorkoutSet } from "../src/lib/validation.js";
 
@@ -119,4 +120,13 @@ test("calculates weight progress from the earliest log and optional target", () 
   assert.equal(withoutTarget.progressPercent, null);
   assert.equal(calculateWeightProgress([], 70), null);
   assert.equal(calculateWeightProgress([{ weight: 80 }], 80).progressPercent, null);
+});
+
+test("turns empty auth errors into actionable messages and preserves useful service errors", () => {
+  const emptyError = new Error("{}");
+  emptyError.status = 400;
+  emptyError.code = "signup_failed";
+  assert.match(authErrorMessage(emptyError, "create your account"), /create your account \(signup_failed, HTTP 400\)/);
+  assert.match(authErrorMessage({}, "sign in"), /Forgot password/);
+  assert.equal(authErrorMessage(new Error("Invalid login credentials"), "sign in"), "Invalid login credentials");
 });
