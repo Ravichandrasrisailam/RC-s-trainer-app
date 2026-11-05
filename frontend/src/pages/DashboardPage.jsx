@@ -1,0 +1,20 @@
+import { ArrowUpRight, Dumbbell, Flame, Footprints, Target, TrendingUp, Weight } from "lucide-react";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { MetricCard, PageIntro, ProgressBar } from "../components/ui";
+
+export default function DashboardPage({ profile, steps, weight, totals, proteinTarget, history, plan, activeDay, onNavigate }) {
+  return <div className="content">
+    <PageIntro eyebrow="CONSISTENCY BUILDS RESULTS" title={`Good to see you, ${profile.firstName}.`} description="Small actions today. Meaningful progress over time."><div className="goal-chip"><Target size={15} />{profile.goal.replace("_", " ").toLowerCase()}</div></PageIntro>
+    <div className="metric-grid">
+      <MetricCard icon={Footprints} label="Steps today" value={steps} target={profile.stepTarget} unit="steps" color="lime" note={`${Math.max(0, profile.stepTarget - steps).toLocaleString()} to go`} />
+      <MetricCard icon={Flame} label="Protein today" value={totals.protein} target={proteinTarget} unit="g" color="mint" note={`${Math.max(0, proteinTarget - totals.protein)}g remaining`} />
+      <MetricCard icon={Weight} label="Body weight" value={weight} target={profile.weightKg} unit="kg" color="blue" note="Latest entry" />
+    </div>
+    <div className="section-heading"><div><h3>Your week at a glance</h3><p className="muted">A simple view of the habits that move you forward.</p></div><button className="text-button" onClick={() => onNavigate("progress")}>View progress <ArrowUpRight size={15} /></button></div>
+    <section className="chart-card"><div className="chart-head"><div><span className="muted">BODY WEIGHT</span><div className="chart-number">{weight.toFixed(1)} <small>kg</small></div></div><span className="trend"><TrendingUp size={15} /> Weekly view</span></div><div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={history}><defs><linearGradient id="weightFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b8e36a" stopOpacity={0.24} /><stop offset="100%" stopColor="#b8e36a" stopOpacity={0} /></linearGradient></defs><CartesianGrid stroke="#252b26" vertical={false} /><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#879087", fontSize: 11 }} /><YAxis domain={["dataMin - 0.4", "dataMax + 0.4"]} axisLine={false} tickLine={false} tick={{ fill: "#879087", fontSize: 11 }} width={35} /><Tooltip contentStyle={{ background: "#171c18", border: "1px solid #303a30", borderRadius: 12, color: "#f5f7f2" }} /><Area type="monotone" dataKey="weight" stroke="#b8e36a" strokeWidth={2.5} fill="url(#weightFill)" /></AreaChart></ResponsiveContainer></div></section>
+    <div className="two-col">
+      <section className="panel"><div className="panel-heading"><div><h3>Nutrition today</h3><p className="muted">Your protein target is {proteinTarget}g.</p></div><button className="icon-button" onClick={() => onNavigate("nutrition")}><ArrowUpRight size={17} /></button></div><div className="macro-row"><span>Protein</span><strong>{totals.protein} / {proteinTarget}g</strong></div><ProgressBar value={totals.protein} target={proteinTarget} color="mint" /><div className="macro-row"><span>Carbs</span><strong>{totals.carbs}g</strong></div><ProgressBar value={totals.carbs} target={220} color="blue" /><div className="macro-row"><span>Fat</span><strong>{totals.fats}g</strong></div><ProgressBar value={totals.fats} target={65} color="amber" /><button className="secondary full-button" onClick={() => onNavigate("nutrition")}>Log a meal <ArrowUpRight size={16} /></button></section>
+      <section className="panel"><div className="panel-heading"><div><h3>Next workout</h3><p className="muted">{plan.label}</p></div><Dumbbell size={18} className="muted" /></div><div className="workout-next"><div className="workout-day">01</div><div><strong>{plan.days[activeDay % plan.days.length]}</strong><p className="muted">4 exercises · approx. 45 min</p></div></div><button className="secondary full-button" onClick={() => onNavigate("training")}>Open training plan <ArrowUpRight size={16} /></button></section>
+    </div>
+  </div>;
+}
