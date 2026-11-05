@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { signupSessionError } from "./lib/auth";
 import { buildWeightLogUpsert, localDateString, stepsFromRow } from "./lib/activity";
 import { isFitnessProfile, isMealPlan, isStepCount, isWeightKg, isWorkoutPlan, isWorkoutSet } from "./lib/validation";
 
@@ -63,7 +64,7 @@ export const api = {
       options: { data: { first_name: firstName, last_name: lastName, full_name: [firstName, lastName].filter(Boolean).join(" "), dob } }
     });
     if (error) throw error;
-    if (!data.session) throw new Error("Please confirm your email before signing in.");
+    if (!data.session) throw new Error(signupSessionError(data.user));
     return data.user;
   },
 

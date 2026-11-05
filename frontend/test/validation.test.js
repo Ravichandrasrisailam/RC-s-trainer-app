@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyProfile } from "../src/data.js";
-import { authErrorMessage } from "../src/lib/auth.js";
+import { authErrorMessage, signupSessionError } from "../src/lib/auth.js";
 import { buildWeightLogUpsert, calculateWeightProgress, formatSteps, stepsFromRow } from "../src/lib/activity.js";
 import { isFitnessProfile, isMealPlan, isStepCount, isWeightKg, isWorkoutPlan, isWorkoutSet } from "../src/lib/validation.js";
 
@@ -129,4 +129,10 @@ test("turns empty auth errors into actionable messages and preserves useful serv
   assert.match(authErrorMessage(emptyError, "create your account"), /create your account \(signup_failed, HTTP 400\)/);
   assert.match(authErrorMessage({}, "sign in"), /Forgot password/);
   assert.equal(authErrorMessage(new Error("Invalid login credentials"), "sign in"), "Invalid login credentials");
+});
+
+test("directs duplicate sign-ups to sign in or password reset", () => {
+  assert.match(signupSessionError({ identities: [] }), /account with this email may already exist/i);
+  assert.match(signupSessionError({ identities: [{ id: "identity-1" }] }), /confirm your email/i);
+  assert.match(signupSessionError(null), /confirm your email/i);
 });

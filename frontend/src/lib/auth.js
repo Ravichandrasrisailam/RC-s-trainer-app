@@ -9,3 +9,10 @@ export function authErrorMessage(error, action) {
   const reason = details.length ? ` (${details.join(", ")})` : "";
   return `Could not ${action}${reason}. Try again, or use Forgot password if you may already have an account.`;
 }
+
+export function signupSessionError(user) {
+  if (Array.isArray(user?.identities) && user.identities.length === 0) {
+    return "An account with this email may already exist. Sign in, or choose Forgot password to reset your password.";
+  }
+  return "Check your inbox and confirm your email before signing in.";
+}
