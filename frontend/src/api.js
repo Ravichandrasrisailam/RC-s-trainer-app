@@ -16,6 +16,16 @@ export function getToken() {
   return localStorage.getItem(tokenKey);
 }
 
+async function invokeAI(body) {
+  const { data, error } = await supabase.functions.invoke("generate-plan", { body });
+  if (error) {
+    let detail;
+    try { detail = await error.context?.json(); } catch { /* keep the SDK error below */ }
+    throw new Error(detail?.error || error.message || "AI request failed.");
+  }
+  return data;
+}
+
 async function currentUser() {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;
@@ -141,8 +151,7 @@ export const api = {
       .select("plan,profile_snapshot").eq("user_id", user.id).maybeSingle();
     if (cacheError) throw cacheError;
     if (cached && Object.entries(snapshot).every(([key, value]) => cached.profile_snapshot?.[key] === value)) return { ...cached.plan, aiGenerated: true };
-    const { data, error } = await supabase.functions.invoke("generate-plan", { body: { task: "generate-workout" } });
-    if (error) throw error;
+    const data = await invokeAI({ task: "generate-workout" });
     if (!data?.plan || data.plan.days?.length !== snapshot.trainingDaysPerWeek || !data.plan.days.every(day => Array.isArray(day.exercises))) {
       throw new Error("The AI returned an incomplete workout plan. Please try again.");
     }
@@ -155,8 +164,7 @@ export const api = {
   },
 
   estimateMeal: async (description) => {
-    const { data, error } = await supabase.functions.invoke("generate-plan", { body: { task: "estimate-meal", description } });
-    if (error) throw error;
+    const data = await invokeAI({ task: "estimate-meal", description });
     if (!data?.estimate || !Number.isFinite(Number(data.estimate.calories))) throw new Error("AI nutrition estimate was invalid.");
     return { ...data.estimate, name: data.estimate.name || description, mealType: "Meal", fiber: Number(data.estimate.fiber || 0) };
   },
