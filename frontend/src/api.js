@@ -104,18 +104,60 @@ export const api = {
     return { ...meal, id: data.id, name: data.title, mealType: data.meal_type, loggedAt: new Date(data.logged_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
   },
 
+
+  getActivityData: async () => {
+    const user = await currentUser();
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+    const today = new Date(now.getFullYear() - 0, now.getMonth(), now.getDate()).toISOString().slice(0, 10);
+    const [mealResult, stepResult, weightResult] = await Promise.all([
+      supabase.from("meal_logs").select("*").eq("user_id", user.id).gte("logged_at", start).lt("logged_at", tomorrow).order("logged_at", { ascending: false }),
+      supabase.from("step_logs").select("*").eq("user_id", user.id).eq("log_date", today).maybeSingle(),
+      supabase.from("weight_logs").select("*").eq("user_id", user.id).order("logged_at", { ascending: true }).limit(30)
+    ]);
+    for (const result of [mealResult, stepResult, weightResult]) if (result.error) throw result.error;
+    const meals = (mealResult.data || []).map(row => ({
+      id: row.id, name: row.title, mealType: row.meal_type, calories: Number(row.calories || 0),
+      protein: Number(row.protein || 0), carbs: Number(row.carbs || 0), fats: Number(row.fats || 0),
+      loggedAt: new Date(row.logged_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    }));
+    const history = (weightResult.data || []).map(row => ({
+      day: new Date(row.logged_at).toLocaleDateString([], { month: "short", day: "numeric" }),
+      weight: Number(row.weight_kg)
+    }));
+    return { meals, steps: Number(stepResult.data?.steps || 0), history, weight: history.at(-1)?.weight };
+  },
+
+  getOrGenerateWorkoutPlan: async (profile) => {
+    const user = await currentUser();
+    const snapshot = {
+      goal: profile.goal, activityLevel: profile.activityLevel,
+      trainingDaysPerWeek: Number(profile.trainingDaysPerWeek), heightCm: Number(profile.heightCm),
+      weightKg: Number(profile.weightKg)
+    };
+    const { data: cached, error: cacheError } = await supabase.from("ai_workout_plans")
+      .select("plan,profile_snapshot").eq("user_id", user.id).maybeSingle();
+    if (cacheError) throw cacheError;
+    if (cached && JSON.stringify(cached.profile_snapshot) === JSON.stringify(snapshot)) return cached.plan;
+    const { data, error } = await supabase.functions.invoke("generate-plan", { body: { profile: snapshot } });
+    if (error) throw error;
+    if (!data?.plan || data.plan.days?.length !== snapshot.trainingDaysPerWeek || !Array.isArray(data.plan.exercises)) {
+      throw new Error("The AI returned an incomplete workout plan. Please try again.");
+    }
+    const { error: saveError } = await supabase.from("ai_workout_plans").upsert({
+      user_id: user.id, training_days_per_week: snapshot.trainingDaysPerWeek,
+      profile_snapshot: snapshot, plan: data.plan, generated_at: new Date().toISOString()
+    }, { onConflict: "user_id" });
+    if (saveError) throw saveError;
+    return data.plan;
+  },
+
   estimateMeal: async (description) => {
-    const text = description.toLowerCase();
-    const estimates = [
-      [/chicken|turkey/, { calories: 420, protein: 42, carbs: 28, fats: 12 }],
-      [/paneer|tofu/, { calories: 360, protein: 24, carbs: 18, fats: 20 }],
-      [/egg/, { calories: 220, protein: 16, carbs: 12, fats: 12 }],
-      [/oat|banana/, { calories: 340, protein: 11, carbs: 58, fats: 8 }],
-      [/rice/, { calories: 260, protein: 5, carbs: 56, fats: 1 }]
-    ];
-    const match = estimates.find(([pattern]) => pattern.test(text));
-    const values = match?.[1] || { calories: 300, protein: 18, carbs: 32, fats: 10 };
-    return { ...values, name: description, mealType: "Meal", fiber: 4 };
+    const { data, error } = await supabase.functions.invoke("generate-plan", { body: { task: "estimate-meal", description } });
+    if (error) throw error;
+    if (!data?.estimate || !Number.isFinite(Number(data.estimate.calories))) throw new Error("AI nutrition estimate was invalid.");
+    return { ...data.estimate, name: data.estimate.name || description, mealType: "Meal", fiber: Number(data.estimate.fiber || 0) };
   },
 
   logWeight: async (weightKg) => {
