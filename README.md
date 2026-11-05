@@ -30,6 +30,7 @@ Generated nutrition is approximate and not medical advice. The function derives 
 ## Data and deployment
 - User-specific meal plans, workout plans, steps, weight, and activity records are persisted in Supabase and protected by row-level security.
 - Vercel Preview should have `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` configured for Preview; production values remain separately scoped.
+- Verify the signed-in flows in a Preview deployment before promoting or merging to Production.
 - OAuth provider setup is managed in Supabase Authentication. Configure the provider's client credentials and allowed redirect URLs in Supabase; do not commit credentials.
 - The separate Spring API still uses its local PostgreSQL/Flyway schema and is not the current frontend data path.
 
