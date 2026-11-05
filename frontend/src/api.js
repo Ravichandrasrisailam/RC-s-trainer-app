@@ -2,21 +2,6 @@ import { supabase } from "./supabaseClient";
 import { buildWeightLogUpsert, localDateString, stepsFromRow } from "./lib/activity";
 import { isFitnessProfile, isMealPlan, isStepCount, isWeightKg, isWorkoutPlan, isWorkoutSet } from "./lib/validation";
 
-const tokenKey = "rc_access_token";
-
-export function saveToken(token) {
-  if (token) localStorage.setItem(tokenKey, token);
-}
-
-export function clearToken() {
-  localStorage.removeItem(tokenKey);
-  supabase.auth.signOut();
-}
-
-export function getToken() {
-  return localStorage.getItem(tokenKey);
-}
-
 async function invokeAI(body) {
   const { data, error } = await supabase.functions.invoke("generate-plan", { body });
   if (error) {
@@ -65,6 +50,12 @@ function profileFromRow(row, user) {
 }
 
 export const api = {
+  getSession: async () => {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    return data.session;
+  },
+
   register: async ({ firstName, lastName, dob, email, password }) => {
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -73,15 +64,35 @@ export const api = {
     });
     if (error) throw error;
     if (!data.session) throw new Error("Please confirm your email before signing in.");
-    saveToken(data.session.access_token);
-    return { token: data.session.access_token };
+    return data.user;
   },
 
   login: async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    saveToken(data.session.access_token);
-    return { token: data.session.access_token };
+    if (!data.session) throw new Error("Sign-in did not create an authenticated session.");
+    return data.user;
+  },
+
+  signOut: async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  },
+
+  requestPasswordReset: async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin
+    });
+    if (error) throw error;
+  },
+
+  updatePassword: async (password) => {
+    if (typeof password !== "string" || password.length < 8) {
+      throw new Error("Password must be at least 8 characters.");
+    }
+    const { data, error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+    return data.user;
   },
 
   getProfile: async () => {

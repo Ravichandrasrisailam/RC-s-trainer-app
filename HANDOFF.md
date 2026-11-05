@@ -67,7 +67,8 @@ The frontend’s active data path is Supabase directly. Deploying the Spring API
 ### Frontend
 
 - React 19/Vite app with Overview, Meals, Workouts, Progress, and Profile screens.
-- Email/password sign-up and sign-in using Supabase Auth; the Supabase client persists and refreshes the session.
+- Email/password sign-up and sign-in using Supabase Auth; auth state restores through `getSession` and follows `onAuthStateChange`, with no parallel localStorage token.
+- Password reset requests use Supabase Auth and the recovery event opens a password-update screen.
 - New profile values start blank rather than being populated with demo fitness values.
 - Onboarding/profile validation requires user-entered height, weight, goal, activity level, training days, steps, protein, and calories; target weight is optional.
 - Meals and workouts use validated AI-generated plans; the current local code does not substitute sample plans when generation is unavailable.
@@ -147,7 +148,7 @@ If the Java service is intentionally out of scope, label it as a future/legacy c
 1. **Get the tested code into the release branch.** Review the local staged/unstaged changes, include the required migration/config files, exclude unrelated files, commit and push to PR #5, then wait for a fresh Preview deployment.
 2. **Verify the fresh Preview is the expected build.** Confirm the profile-driven empty states and the current AI-generation flow are present; do not infer this from an older deployment or the PR title.
 3. **Run authenticated UAT end to end on that exact Preview.** Use a dedicated test account and verify:
-   - Sign-in, sign-up behavior with email confirmation enabled/disabled, sign-out, and session restoration.
+   - Sign-in, sign-up behavior with email confirmation enabled/disabled, sign-out, session restoration, and password recovery/update.
    - First-time onboarding, profile save, profile reload, and required fields.
    - Meal and workout plan generation, plan cache reuse, regeneration, and user-visible failure/quota behavior.
    - Meal estimate/log, steps, weight, workout-set writes, and persistence after reload.
@@ -159,7 +160,7 @@ If the Java service is intentionally out of scope, label it as a future/legacy c
 
 ### P1 — Required before a broad public launch
 
-- Confirm Supabase Auth email-confirmation settings, allowed site URLs, redirect URLs, password policy, and production/Preview domain allowlists. The frontend currently has no visible password-reset flow; account recovery should be added or an operational recovery path documented.
+- Confirm Supabase Auth email-confirmation settings, allowed site URLs, redirect URLs (including Preview origins), password policy, and production/Preview domain allowlists. Password recovery is implemented locally but still needs to be exercised end-to-end.
 - Verify that the Cloudflare token is scoped to the minimum Workers AI permissions and that its current value is only stored in Supabase secrets. Do not put credentials in this document, Vercel client environment variables, logs, or chat.
 - Review monitoring and alerting for Edge Function failures, Supabase errors, Cloudflare quota, and Vercel build/deployment failures.
 - Define account deletion, user-data export/retention, and support procedures. These product/operational flows were not verified in the app.
@@ -178,9 +179,10 @@ If the Java service is intentionally out of scope, label it as a future/legacy c
 
 | Check | Result | Scope |
 |---|---|---|
-| Frontend unit tests | Pass — 9 tests | Local Step C working tree; `npm test` in `frontend/`. |
-| Frontend production build | Pass | Local working tree; `npm run build` in `frontend/`. |
-| `git diff --check` | Pass | Local working tree at the last check. |
+| Frontend unit tests | Pass — 9 tests | Local Step C/D working tree; `npm test` in `frontend/`. |
+| Frontend production build | Pass | Local Step C/D working tree; `npm run build` in `frontend/`. |
+| `git diff --check` | Pass | Local Step D working tree. |
+| Auth session and recovery implementation | Implemented; end-to-end UAT pending | Session restored/listened through Supabase Auth; reset email and recovery password update require a fresh Preview check. |
 | Supabase schema/policy verification | Pass | Project `inktrhlrcelzcqecpltt`; migration 004 data, constraint, and policy checks passed. |
 | Supabase migration-history reconciliation | Pass | Six earlier records preserved; four local migration versions recorded after schema checks. |
 | Edge Function deployment | Reported successful | Supabase dashboard confirmed deployment. |
@@ -192,13 +194,12 @@ If the Java service is intentionally out of scope, label it as a future/legacy c
 
 ## Recommended next sequence
 
-1. Review `git status`, staged diff, unstaged diff, and untracked files.
-2. Commit and push the Step C and Step D changes and release documentation to PR #5.
-4. Confirm the GitHub test/build workflow runs and the new Vercel Preview builds from that exact commit.
-5. Run and record the authenticated UAT checklist above without using real user data as test data.
-6. Fix any failures and repeat the Preview checks.
-7. Obtain explicit Production-release approval, verify Production environment variables/secrets, deploy the frontend, and run a short post-deploy smoke test.
-8. Keep the Java API out of the release unless separately approved and made production-ready.
+1. Commit and push the Step D changes and release documentation to PR #5.
+2. Confirm the GitHub test/build workflow runs and the new Vercel Preview builds from that exact commit.
+3. Run and record the authenticated UAT checklist above without using real user data as test data.
+4. Fix any failures and repeat the Preview checks.
+5. Obtain explicit Production-release approval, verify Production environment variables/secrets, deploy the frontend, and run a short post-deploy smoke test.
+6. Keep the Java API out of the release unless separately approved and made production-ready.
 
 ## Key references
 

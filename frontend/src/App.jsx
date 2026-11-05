@@ -1,26 +1,110 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Activity, Apple, BarChart3, ChevronDown, Dumbbell, Home, LogOut } from "lucide-react";
-import { api, clearToken, saveToken } from "./api";
+import { api } from "./api";
 import { emptyProfile } from "./data";
 import { isStepCount, isWeightKg } from "./lib/validation";
+import { supabase } from "./supabaseClient";
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const MealsPage = lazy(() => import("./pages/MealsPage"));
 const TrainingPage = lazy(() => import("./pages/TrainingPage"));
 const ProgressPage = lazy(() => import("./pages/ProgressPage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 
-function AuthScreen({ onAuth }) {
+function AuthScreen({ initialError = "" }) {
   const [mode, setMode] = useState("register");
   const [form, setForm] = useState({ firstName: "", lastName: "", dob: "", email: "", password: "" });
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(e) {
-    e.preventDefault(); setError(""); setBusy(true);
-    try { const result = mode === "register" ? await api.register({ ...form }) : await api.login(form.email, form.password); saveToken(result.token); onAuth(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Unable to sign in. Please try again."); }
-    finally { setBusy(false); }
+    e.preventDefault();
+    setError("");
+    setNotice("");
+    setBusy(true);
+    try {
+      if (mode === "reset") {
+        await api.requestPasswordReset(form.email);
+        setNotice("If an account exists for that address, a password reset link has been sent.");
+      } else if (mode === "register") {
+        await api.register({ ...form });
+      } else {
+        await api.login(form.email, form.password);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to complete the request. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
-  return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">YOUR TRAINING. YOUR PROGRESS.</div><h1>{mode === "register" ? "Build your stronger self." : "Welcome back."}</h1><p className="muted">A clearer plan for every workout and every meal.</p><div className="auth-switch"><button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Create account</button><button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Sign in</button></div><form onSubmit={submit} className="form-grid">{mode === "register" && <><label>First name<input required value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} placeholder="First name" /></label><label>Last name<input required value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} placeholder="Last name" /></label><label className="full">Date of birth<input required type="date" value={form.dob} onChange={e => setForm({ ...form, dob: e.target.value })} /></label></>}<label className="full">Email address<input required type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="you@example.com" /></label><label className="full">Password<input required minLength={8} type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="At least 8 characters" /></label>{error && <p className="error full">{error}</p>}<button className="primary full" disabled={busy}>{busy ? "Please wait…" : mode === "register" ? "Create account" : "Sign in"}</button></form><p className="auth-legal">By continuing, you agree to use RC Trainer as a fitness tracking tool, not as a substitute for professional medical advice.</p></section></main>;
+  return <main className="auth-shell">
+    <div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div>
+    <section className="auth-card">
+      <div className="eyebrow">YOUR TRAINING. YOUR PROGRESS.</div>
+      <h1>{mode === "register" ? "Build your stronger self." : mode === "reset" ? "Reset your password." : "Welcome back."}</h1>
+      <p className="muted">A clearer plan for every workout and every meal.</p>
+      {initialError && <p className="error">{initialError}</p>}
+      {mode === "reset"
+        ? <button className="text-button" type="button" onClick={() => { setMode("login"); setError(""); setNotice(""); }}>Back to sign in</button>
+        : <div className="auth-switch">
+          <button className={mode === "register" ? "active" : ""} onClick={() => { setMode("register"); setError(""); setNotice(""); }}>Create account</button>
+          <button className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); setNotice(""); }}>Sign in</button>
+        </div>}
+      <form onSubmit={submit} className="form-grid">
+        {mode === "register" && <>
+          <label>First name<input required value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} placeholder="First name" /></label>
+          <label>Last name<input required value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} placeholder="Last name" /></label>
+          <label className="full">Date of birth<input required type="date" value={form.dob} onChange={e => setForm({ ...form, dob: e.target.value })} /></label>
+        </>}
+        <label className="full">Email address<input required type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="you@example.com" /></label>
+        {mode !== "reset" && <label className="full">Password<input required minLength={8} type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="At least 8 characters" /></label>}
+        {error && <p className="error full">{error}</p>}
+        {notice && <p className="muted full" role="status">{notice}</p>}
+        <button className="primary full" disabled={busy}>{busy ? "Please wait…" : mode === "register" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}</button>
+      </form>
+      {mode === "login" && <button className="text-button" type="button" onClick={() => { setMode("reset"); setError(""); setNotice(""); }}>Forgot password?</button>}
+      <p className="auth-legal">By continuing, you agree to use RC Trainer as a fitness tracking tool, not as a substitute for professional medical advice.</p>
+    </section>
+  </main>;
+}
+
+function PasswordRecoveryScreen({ onComplete }) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    if (password !== confirmation) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.updatePassword(password);
+      onComplete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Password could not be updated.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <main className="auth-shell">
+    <div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div>
+    <section className="auth-card">
+      <div className="eyebrow">ACCOUNT RECOVERY</div>
+      <h1>Choose a new password.</h1>
+      <p className="muted">Use at least 8 characters for your new password.</p>
+      <form className="form-grid" onSubmit={submit}>
+        <label className="full">New password<input required minLength={8} type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} /></label>
+        <label className="full">Confirm new password<input required minLength={8} type="password" autoComplete="new-password" value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>
+        {error && <p className="error full">{error}</p>}
+        <button className="primary full" disabled={busy}>{busy ? "Updating…" : "Update password"}</button>
+      </form>
+    </section>
+  </main>;
 }
 
 function Onboarding({ profile, onSave, error }) {
@@ -38,7 +122,10 @@ const nav = [{ id: "overview", label: "Overview", icon: Home }, { id: "nutrition
 const todayLabel = new Date().toLocaleDateString([], { weekday: "long" }).toUpperCase();
 
 export default function App() {
-  const [authenticated, setAuthenticated] = useState(Boolean(localStorage.getItem("rc_access_token")));
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [onboarded, setOnboarded] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
@@ -70,8 +157,59 @@ export default function App() {
   const proteinTarget = Number(profile.proteinTargetG ?? profile.proteinTarget) || null;
   const caloriesTarget = Number(profile.caloriesTarget) || null;
   const plan = generatedPlan?.days?.length === days ? generatedPlan : null;
+
   useEffect(() => {
-    if (!authenticated) { setProfileLoading(false); return; }
+    let active = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+      setAuthenticated(Boolean(session));
+      setAuthReady(true);
+      setAuthError("");
+      if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+      if (event === "SIGNED_OUT") setPasswordRecovery(false);
+    });
+
+    api.getSession()
+      .then(session => {
+        if (!active) return;
+        setAuthenticated(Boolean(session));
+        setAuthReady(true);
+      })
+      .catch(error => {
+        if (!active) return;
+        setAuthError(error instanceof Error ? error.message : "Could not restore your sign-in session.");
+        setAuthReady(true);
+      });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authReady || passwordRecovery) return;
+    if (!authenticated) {
+      setProfileLoading(false);
+      setProfile(emptyProfile);
+      setOnboarded(false);
+      setProfileError("");
+      setProfileSaveError("");
+      setMeals([]);
+      setMealText("");
+      setMealPlan(null);
+      setGeneratedPlan(null);
+      setHistory([]);
+      setSteps(null);
+      setStepsInput("");
+      setWeight(null);
+      setWeightInput("");
+      setStartWeight(null);
+      setRecentSets([]);
+      setExerciseLogs({});
+      return;
+    }
+    setProfileLoading(true);
     setProfileError("");
     setMealPlan(null);
     setMealPlanError("");
@@ -122,7 +260,7 @@ export default function App() {
         finally { setMealPlanBusy(false); }
       }
     }).catch(err => { setProfileError(err instanceof Error ? err.message : "Could not load your saved profile."); }).finally(() => setProfileLoading(false));
-  }, [authenticated]);
+  }, [authenticated, authReady, passwordRecovery]);
   async function saveProfile(next) {
     setProfileSaveError("");
     try {
@@ -203,11 +341,45 @@ export default function App() {
       setToast(err instanceof Error ? `Steps were not saved: ${err.message}` : "Steps could not be saved.");
     }
   }
-  if (!authenticated) return <AuthScreen onAuth={() => { setProfileLoading(true); setProfileError(""); setAuthenticated(true); }} />;
+  async function signOut() {
+    try {
+      await api.signOut();
+      setToast("Signed out.");
+    } catch (error) {
+      setToast(error instanceof Error ? `Could not sign out: ${error.message}` : "Could not sign out.");
+    }
+  }
+  if (!authReady) return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">RC TRAINER</div><h1>Restoring your session.</h1><p className="muted">Checking your secure Supabase session.</p></section></main>;
+  if (passwordRecovery) return <PasswordRecoveryScreen onComplete={() => { setPasswordRecovery(false); setToast("Password updated."); }} />;
+  if (!authenticated) return <AuthScreen initialError={authError} />;
   if (profileLoading) return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">RC TRAINER</div><h1>Loading your profile.</h1><p className="muted">Preparing your dashboard and recommendations.</p></section></main>;
-  if (profileError) return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">PROFILE UNAVAILABLE</div><h1>We couldn't load your profile.</h1><p className="error">{profileError}</p><button className="primary full" onClick={() => window.location.reload()}>Try again</button><button className="secondary full" onClick={() => { clearToken(); setAuthenticated(false); }}>Sign in again</button></section></main>;
+  if (profileError) return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">PROFILE UNAVAILABLE</div><h1>We couldn't load your profile.</h1><p className="error">{profileError}</p><button className="primary full" onClick={() => window.location.reload()}>Try again</button><button className="secondary full" onClick={signOut}>Sign in again</button></section></main>;
   if (!onboarded) return <Onboarding profile={profile} onSave={saveProfile} error={profileSaveError} />;
   const pageTitle = { overview: "Your overview", nutrition: "Nutrition", training: "Training plan", progress: "Your progress", profile: "Profile" }[tab];
   const page = { overview: <DashboardPage profile={profile} steps={steps} weight={weight} totals={totals} proteinTarget={proteinTarget} caloriesTarget={caloriesTarget} history={history} startWeight={startWeight} plan={plan} activeDay={activeDay} onNavigate={setTab} />, nutrition: <MealsPage meals={meals} totals={totals} proteinTarget={proteinTarget} caloriesTarget={caloriesTarget} mealText={mealText} setMealText={setMealText} mealBusy={mealBusy} mealError={mealError} addMeal={addMeal} mealPlan={mealPlan} mealPlanBusy={mealPlanBusy} generateMealPlan={generateMealPlan} mealPlanError={mealPlanError} logPlannedMeal={logPlannedMeal} />, training: <TrainingPage days={days} setDays={setDays} onDaysChange={changeTrainingDays} plan={plan} activeDay={activeDay} workoutPlanBusy={workoutPlanBusy} regenerateWorkoutPlan={regenerateWorkoutPlan} setActiveDay={setActiveDay} exerciseLogs={exerciseLogs} setExerciseLogs={setExerciseLogs} recentSets={recentSets} setRecentSets={setRecentSets} setToast={setToast} />, progress: <ProgressPage weight={weight} weightInput={weightInput} setWeightInput={setWeightInput} addWeight={addWeight} steps={steps} stepsInput={stepsInput} setStepsInput={setStepsInput} saveSteps={saveSteps} history={history} setToast={setToast} />, profile: <ProfilePage profile={profile} onSave={saveProfile} /> }[tab];
-  return <div className="app-shell"><aside className="sidebar"><div className="brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><div className="side-label">WORKSPACE</div><nav>{nav.map(n => <button key={n.id} className={tab === n.id ? "nav-item selected" : "nav-item"} onClick={() => setTab(n.id)}><n.icon size={18} />{n.label}</button>)}</nav><div className="sidebar-bottom"><div className="profile-mini"><div className="avatar">{profile.firstName[0]}</div><div><strong>{profile.firstName} {profile.lastName}</strong><small>{profile.goal.replace("_", " ").toLowerCase()}</small></div><button className="icon-button" onClick={() => setShowProfile(!showProfile)}><ChevronDown size={16} /></button></div>{showProfile && <button className="nav-item" onClick={() => { clearToken(); setAuthenticated(false); setOnboarded(false); setProfile(emptyProfile); setMeals([]); setMealPlan(null); setGeneratedPlan(null); }}><LogOut size={17} /> Sign out</button>}</div></aside><main className="main-area"><header className="topbar"><div><span className="muted">{todayLabel}, YOUR NEXT REP STARTS HERE</span><h1>{pageTitle}</h1></div><button className="date-pill"><Activity size={15} /> Today <ChevronDown size={14} /></button></header><Suspense fallback={<section className="content"><p className="muted">Loading…</p></section>}>{page}</Suspense><footer className="footer"><span>RC TRAINER</span><span>Progress over perfection.</span></footer></main><nav className="mobile-nav">{nav.map(n => <button key={n.id} className={tab === n.id ? "mobile-item active" : "mobile-item"} onClick={() => setTab(n.id)}><n.icon size={19} /><span>{n.label}</span></button>)}</nav>{toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}</div>;
+  return <div className="app-shell">
+    <aside className="sidebar">
+      <div className="brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div>
+      <div className="side-label">WORKSPACE</div>
+      <nav>{nav.map(n => <button key={n.id} className={tab === n.id ? "nav-item selected" : "nav-item"} onClick={() => setTab(n.id)}><n.icon size={18} />{n.label}</button>)}</nav>
+      <div className="sidebar-bottom">
+        <div className="profile-mini">
+          <div className="avatar">{profile.firstName[0]}</div>
+          <div><strong>{profile.firstName} {profile.lastName}</strong><small>{profile.goal.replace("_", " ").toLowerCase()}</small></div>
+          <button className="icon-button" onClick={() => setShowProfile(!showProfile)}><ChevronDown size={16} /></button>
+        </div>
+        {showProfile && <button className="nav-item" onClick={signOut}><LogOut size={17} /> Sign out</button>}
+      </div>
+    </aside>
+    <main className="main-area">
+      <header className="topbar">
+        <div><span className="muted">{todayLabel}, YOUR NEXT REP STARTS HERE</span><h1>{pageTitle}</h1></div>
+        <button className="date-pill"><Activity size={15} /> Today <ChevronDown size={14} /></button>
+      </header>
+      <Suspense fallback={<section className="content"><p className="muted">Loading…</p></section>}>{page}</Suspense>
+      <footer className="footer"><span>RC TRAINER</span><span>Progress over perfection.</span></footer>
+    </main>
+    <nav className="mobile-nav">{nav.map(n => <button key={n.id} className={tab === n.id ? "mobile-item active" : "mobile-item"} onClick={() => setTab(n.id)}><n.icon size={19} /><span>{n.label}</span></button>)}</nav>
+    {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
+  </div>;
 }
