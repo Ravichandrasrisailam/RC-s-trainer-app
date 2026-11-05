@@ -16,8 +16,6 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return respond({ error: "Method not allowed." }, 405);
 
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) return respond({ error: "AI is not configured yet. Add GEMINI_API_KEY to Supabase Edge Function secrets." }, 503);
   const auth = req.headers.get("Authorization") || "";
   const token = auth.replace(/^Bearer\s+/i, "");
   const url = Deno.env.get("SUPABASE_URL");
@@ -59,23 +57,36 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const model = Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
-    const result = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    const accountId = Deno.env.get("CLOUDFLARE_ACCOUNT_ID");
+    const apiToken = Deno.env.get("CLOUDFLARE_API_TOKEN");
+    if (!accountId || !apiToken) {
+      return respond({ error: "AI is not configured yet. Add CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN to Supabase Edge Function secrets." }, 503);
+    }
+    const model = Deno.env.get("CLOUDFLARE_AI_MODEL") || "@cf/meta/llama-3.1-8b-instruct";
+    const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model.split("/").map(encodeURIComponent).join("/")}`;
+    const result = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.35, maxOutputTokens: 5000 }
+        messages: [
+          { role: "system", content: "You create safe, practical fitness and nutrition data. Return valid JSON only, with no markdown or commentary." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.35,
+        max_tokens: 5000
       })
     });
     if (!result.ok) {
       const detail = await result.text();
-      console.error("Gemini request failed", result.status, detail.slice(0, 500));
-      return respond({ error: "The AI provider could not generate a response. Check the Gemini key and model configuration." }, 502);
+      console.error("Workers AI request failed", result.status, detail.slice(0, 500));
+      if (result.status === 429) return respond({ error: "The free AI allowance is temporarily exhausted. Please try again after the daily quota resets." }, 429);
+      return respond({ error: "The AI provider could not generate a response. Check the Cloudflare Workers AI account and token." }, 502);
     }
     const resultBody = await result.json();
-    const text = resultBody?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("") || "";
-    const parsed = JSON.parse(text);
+    const generated = resultBody?.result?.response ?? resultBody?.result;
+    const parsed = typeof generated === "string" ? JSON.parse(generated) : generated;
+    if (!parsed || typeof parsed !== "object") throw new Error("Invalid JSON response");
     if (task === "estimate-meal") {
       for (const key of ["calories", "protein", "carbs", "fats", "fiber"]) {
         if (!Number.isFinite(Number(parsed[key])) || Number(parsed[key]) < 0) throw new Error("Invalid nutrition values");
