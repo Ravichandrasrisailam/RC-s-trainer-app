@@ -163,6 +163,29 @@ export const api = {
     return { ...data.plan, aiGenerated: true };
   },
 
+  getOrGenerateMealPlan: async (profile) => {
+    const user = await currentUser();
+    const snapshot = {
+      goal: profile.goal, activityLevel: profile.activityLevel,
+      trainingDaysPerWeek: Number(profile.trainingDaysPerWeek), heightCm: Number(profile.heightCm),
+      weightKg: Number(profile.weightKg), proteinTarget: Number(profile.proteinTargetG ?? profile.proteinTarget)
+    };
+    const { data: cached, error } = await supabase.from("ai_meal_plans")
+      .select("meal_plan,profile_snapshot,generated_at").eq("user_id", user.id).maybeSingle();
+    if (error) throw error;
+    const sameProfile = cached && Object.entries(snapshot).every(([key, value]) => cached.profile_snapshot?.[key] === value);
+    const generatedToday = cached && new Date(cached.generated_at).toDateString() === new Date().toDateString();
+    if (sameProfile && generatedToday) return cached.meal_plan;
+    const data = await invokeAI({ task: "generate-meals" });
+    if (!Array.isArray(data?.mealPlan?.meals) || data.mealPlan.meals.length < 3) throw new Error("The AI returned an incomplete meal plan.");
+    const { error: saveError } = await supabase.from("ai_meal_plans").upsert({
+      user_id: user.id, profile_snapshot: snapshot, meal_plan: data.mealPlan,
+      generated_at: new Date().toISOString()
+    }, { onConflict: "user_id" });
+    if (saveError) throw saveError;
+    return data.mealPlan;
+  },
+
   estimateMeal: async (description) => {
     const data = await invokeAI({ task: "estimate-meal", description });
     if (!data?.estimate || !Number.isFinite(Number(data.estimate.calories))) throw new Error("AI nutrition estimate was invalid.");
