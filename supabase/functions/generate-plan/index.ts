@@ -40,6 +40,11 @@ Deno.serve(async (req: Request) => {
     const description = (body.description || "").trim().slice(0, 500);
     if (!description) return respond({ error: "Describe the meal first." }, 400);
     prompt = `Estimate nutrition for the described meal and portion. Respond only with JSON keys name, calories, protein, carbs, fats, fiber. Calories are kcal and all macros are grams. Values must be non-negative numbers. Be conservative and state estimate in name. This is approximate, not medical advice. Meal: ${description}`;
+  } else if (task === "generate-meals") {
+    const { data: profile, error } = await supabase.from("profiles").select("goal,activity_level,training_days_per_week,height_cm,weight_kg,protein_target_g,calories_target").eq("id", userData.user.id).maybeSingle();
+    if (error) return respond({ error: "Could not load your saved profile." }, 400);
+    if (!profile || !profile.goal) return respond({ error: "Save your profile before generating meals." }, 400);
+    prompt = `Create a practical one-day meal plan personalized for this saved user profile: goal=${profile.goal}; activity level=${profile.activity_level}; training days per week=${profile.training_days_per_week}; weight kg=${profile.weight_kg}; height cm=${profile.height_cm}; protein target grams=${profile.protein_target_g}; calorie target kcal=${profile.calories_target}. Respond ONLY with JSON keys label and meals. Include 3-5 realistic meals that respect the user's goal and protein target, use common ingredients, state portion clearly, and include mealType, calories, protein, carbs, fats, fiber (all non-negative numbers; macros in grams), portion, and a brief preparation note. Avoid medical claims, extreme calorie restriction, and supplements as requirements. These are estimates, not medical advice.`;
   } else if (task === "generate-workout") {
     const { data: profile, error } = await supabase.from("profiles")
       .select("goal,activity_level,training_days_per_week,height_cm,weight_kg")
@@ -76,6 +81,14 @@ Deno.serve(async (req: Request) => {
         if (!Number.isFinite(Number(parsed[key])) || Number(parsed[key]) < 0) throw new Error("Invalid nutrition values");
       }
       return respond({ estimate: parsed });
+    }
+    if (task === "generate-meals") {
+      if (typeof parsed.label !== "string" || !Array.isArray(parsed.meals) || parsed.meals.length < 3 || parsed.meals.length > 5) throw new Error("Invalid meal plan shape");
+      for (const meal of parsed.meals) {
+        if (typeof meal.name !== "string" || typeof meal.mealType !== "string" || typeof meal.portion !== "string") throw new Error("Invalid meal details");
+        for (const key of ["calories", "protein", "carbs", "fats", "fiber"]) if (!Number.isFinite(Number(meal[key])) || Number(meal[key]) < 0) throw new Error("Invalid meal macros");
+      }
+      return respond({ mealPlan: parsed });
     }
     if (typeof parsed.label !== "string" || !Array.isArray(parsed.days)) throw new Error("Invalid plan shape");
     const expectedDays = Number((await supabase.from("profiles").select("training_days_per_week").eq("id", userData.user.id).single()).data?.training_days_per_week);
