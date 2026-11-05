@@ -115,7 +115,7 @@ export const api = {
     const [mealResult, stepResult, weightResult] = await Promise.all([
       supabase.from("meal_logs").select("*").eq("user_id", user.id).gte("logged_at", start).lt("logged_at", tomorrow).order("logged_at", { ascending: false }),
       supabase.from("step_logs").select("*").eq("user_id", user.id).eq("log_date", today).maybeSingle(),
-      supabase.from("weight_logs").select("*").eq("user_id", user.id).order("logged_at", { ascending: true }).limit(30)
+      supabase.from("weight_logs").select("*").eq("user_id", user.id).order("logged_at", { ascending: false }).limit(30)
     ]);
     for (const result of [mealResult, stepResult, weightResult]) if (result.error) throw result.error;
     const meals = (mealResult.data || []).map(row => ({
@@ -123,7 +123,7 @@ export const api = {
       protein: Number(row.protein || 0), carbs: Number(row.carbs || 0), fats: Number(row.fats || 0),
       loggedAt: new Date(row.logged_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     }));
-    const history = (weightResult.data || []).map(row => ({
+    const history = (weightResult.data || []).slice().reverse().map(row => ({
       day: new Date(row.logged_at).toLocaleDateString([], { month: "short", day: "numeric" }),
       weight: Number(row.weight_kg)
     }));
@@ -140,7 +140,7 @@ export const api = {
     const { data: cached, error: cacheError } = await supabase.from("ai_workout_plans")
       .select("plan,profile_snapshot").eq("user_id", user.id).maybeSingle();
     if (cacheError) throw cacheError;
-    if (cached && JSON.stringify(cached.profile_snapshot) === JSON.stringify(snapshot)) return cached.plan;
+    if (cached && JSON.stringify(cached.profile_snapshot) === JSON.stringify(snapshot)) return { ...cached.plan, aiGenerated: true };
     const { data, error } = await supabase.functions.invoke("generate-plan", { body: { task: "generate-workout" } });
     if (error) throw error;
     if (!data?.plan || data.plan.days?.length !== snapshot.trainingDaysPerWeek || !Array.isArray(data.plan.exercises)) {
@@ -151,7 +151,7 @@ export const api = {
       profile_snapshot: snapshot, plan: data.plan, generated_at: new Date().toISOString()
     }, { onConflict: "user_id" });
     if (saveError) throw saveError;
-    return data.plan;
+    return { ...data.plan, aiGenerated: true };
   },
 
   estimateMeal: async (description) => {
