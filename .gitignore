@@ -9,3 +9,4 @@ tools/maven/
 .vscode/
 .DS_Store
 *.log
+.vercel

@@ -20,6 +20,40 @@ function isNutritionValue(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 999999.99;
 }
 
+function describeMealPlanResponseShape(value: unknown) {
+  if (Array.isArray(value)) {
+    const firstItem = value[0];
+    return {
+      type: "array",
+      length: value.length,
+      firstItemType: Array.isArray(firstItem) ? "array" : typeof firstItem,
+      firstItemKeys: isRecord(firstItem) ? Object.keys(firstItem).slice(0, 20) : undefined
+    };
+  }
+  if (!isRecord(value)) return { type: typeof value };
+
+  const mealEntries = Array.isArray(value.meals) ? value.meals : [];
+  return {
+    type: "object",
+    keys: Object.keys(value).slice(0, 20),
+    nestedMealPlanType: typeof value.mealPlan,
+    nestedMealPlanSnakeCaseType: typeof value.meal_plan,
+    nestedPlanType: typeof value.plan,
+    mealsType: Array.isArray(value.meals) ? "array" : typeof value.meals,
+    mealsLength: Array.isArray(value.meals) ? value.meals.length : undefined,
+    mealEntryShapes: mealEntries.slice(0, 5).map((meal) => {
+      if (!isRecord(meal)) return { type: Array.isArray(meal) ? "array" : typeof meal };
+      const nestedMeal = Array.isArray(meal.meals) ? meal.meals[0] : undefined;
+      return {
+        keys: Object.keys(meal).slice(0, 20),
+        fieldTypes: Object.fromEntries(Object.entries(meal).slice(0, 20).map(([key, field]) => [key, Array.isArray(field) ? "array" : typeof field])),
+        nestedMealCount: Array.isArray(meal.meals) ? meal.meals.length : undefined,
+        nestedMealKeys: isRecord(nestedMeal) ? Object.keys(nestedMeal).slice(0, 20) : undefined
+      };
+    })
+  };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return respond({ error: "Method not allowed." }, 405);
@@ -106,10 +140,15 @@ Deno.serve(async (req: Request) => {
     if (resultBody?.success === false) throw new Error("Workers AI returned an unsuccessful response");
     const providerResult = resultBody.result;
     const generated = isRecord(providerResult) ? providerResult.response ?? providerResult : providerResult;
-    let parsed: unknown = typeof generated === "string" ? JSON.parse(generated) : generated;
+    const providerResponse: unknown = typeof generated === "string" ? JSON.parse(generated) : generated;
+    let parsed: unknown = providerResponse;
     if (task === "generate-meals") {
       const { normalizeMealPlan } = await import("./response-normalizers.js");
-      parsed = normalizeMealPlan(parsed);
+      parsed = normalizeMealPlan(providerResponse);
+      if (!parsed) {
+        console.error("Workers AI meal-plan response shape was rejected", describeMealPlanResponseShape(providerResponse));
+        throw new Error("Workers AI returned an unsupported meal-plan shape");
+      }
     }
     if (!isRecord(parsed)) throw new Error("Invalid JSON response");
     if (task === "estimate-meal") {

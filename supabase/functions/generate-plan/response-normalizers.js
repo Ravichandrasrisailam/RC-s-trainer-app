@@ -36,7 +36,7 @@ function firstNutritionValue(...values) {
 function normalizeMeal(value) {
   if (!isRecord(value)) return null;
 
-  const name = firstString(value.name, value.title, value.dish);
+  const name = firstString(value.name, value.label, value.title, value.dish);
   const calories = firstNutritionValue(value.calories, value.calories_kcal);
   const protein = firstNutritionValue(value.protein, value.protein_g);
   const carbs = firstNutritionValue(value.carbs, value.carbohydrates, value.carbs_g);
@@ -51,7 +51,7 @@ function normalizeMeal(value) {
     name,
     mealType: firstString(value.mealType, value.meal_type, value.type) ?? "Meal",
     portion: firstString(value.portion, value.serving, value.servingSize, value.serving_size) ?? "One serving",
-    preparation: firstString(value.preparation, value.notes, value.instructions, value.description) ?? "",
+    preparation: firstString(value.preparation, value.preparationNote, value.note, value.notes, value.instructions, value.description) ?? "",
     calories,
     protein,
     carbs,
@@ -79,8 +79,23 @@ export function normalizeMealPlan(value) {
     ? { meals: nestedPlan }
     : nestedPlan ?? root;
 
-  const sourceMeals = [plan.meals, plan.items, plan.plan]
+  let sourceMeals = [plan.meals, plan.items, plan.plan]
     .find((candidate) => Array.isArray(candidate));
+
+  let nestedLabel = null;
+  if (Array.isArray(sourceMeals)) {
+    const flattenedMeals = [];
+    for (const meal of sourceMeals) {
+      if (isRecord(meal) && Array.isArray(meal.meals)) {
+        if (meal.meals.length !== 1) return null;
+        nestedLabel = firstString(nestedLabel, meal.label);
+        flattenedMeals.push(meal.meals[0]);
+      } else {
+        flattenedMeals.push(meal);
+      }
+    }
+    sourceMeals = flattenedMeals;
+  }
 
   if (!Array.isArray(sourceMeals) || sourceMeals.length < 3 || sourceMeals.length > 5) {
     return null;
@@ -90,7 +105,7 @@ export function normalizeMealPlan(value) {
   if (meals.some((meal) => meal === null)) return null;
 
   return {
-    label: firstString(plan.label, plan.title, root.label, root.title) ?? "Personalized meal plan",
+    label: firstString(plan.label, plan.title, root.label, root.title, nestedLabel) ?? "Personalized meal plan",
     meals,
   };
 }
