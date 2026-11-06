@@ -106,7 +106,11 @@ Deno.serve(async (req: Request) => {
     if (resultBody?.success === false) throw new Error("Workers AI returned an unsuccessful response");
     const providerResult = resultBody.result;
     const generated = isRecord(providerResult) ? providerResult.response ?? providerResult : providerResult;
-    const parsed: unknown = typeof generated === "string" ? JSON.parse(generated) : generated;
+    let parsed: unknown = typeof generated === "string" ? JSON.parse(generated) : generated;
+    if (task === "generate-meals") {
+      const { normalizeMealPlan } = await import("./response-normalizers.js");
+      parsed = normalizeMealPlan(parsed);
+    }
     if (!isRecord(parsed)) throw new Error("Invalid JSON response");
     if (task === "estimate-meal") {
       for (const key of ["calories", "protein", "carbs", "fats", "fiber"]) {
