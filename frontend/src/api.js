@@ -50,6 +50,22 @@ function profileFromRow(row, user) {
   return profile;
 }
 
+async function getAllUserRows(table, userId, orderColumn) {
+  const rows = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase.from(table)
+      .select("*")
+      .eq("user_id", userId)
+      .order(orderColumn, { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < pageSize) return rows;
+  }
+}
+
 export const api = {
   getSession: async () => {
     const { data, error } = await supabase.auth.getSession();
@@ -150,27 +166,43 @@ export const api = {
     };
     const { data, error } = await supabase.from("meal_logs").insert(payload).select().single();
     if (error) throw error;
-    return { ...meal, id: data.id, name: data.title, mealType: data.meal_type, loggedAt: new Date(data.logged_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+    return {
+      ...meal,
+      id: data.id,
+      name: data.title,
+      mealType: data.meal_type,
+      loggedOn: localDateString(new Date(data.logged_at)),
+      loggedAt: new Date(data.logged_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    };
   },
 
 
   getActivityData: async () => {
     const user = await currentUser();
     const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
+    const start = firstDay.toISOString();
     const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
     const today = localDateString(now);
-    const [mealResult, stepResult, weightResult, firstWeightResult] = await Promise.all([
-      supabase.from("meal_logs").select("*").eq("user_id", user.id).gte("logged_at", start).lt("logged_at", tomorrow).order("logged_at", { ascending: false }),
-      supabase.from("step_logs").select("*").eq("user_id", user.id).eq("log_date", today).maybeSingle(),
+    const firstDayString = localDateString(firstDay);
+    const [mealResult, stepHistoryResult, weightResult, firstWeightResult] = await Promise.all([
+      supabase.from("meal_logs").select("*").eq("user_id", user.id).gte("logged_at", start).lt("logged_at", tomorrow).order("logged_at", { ascending: false }).limit(1000),
+      supabase.from("step_logs").select("*").eq("user_id", user.id).gte("log_date", firstDayString).lte("log_date", today).order("log_date", { ascending: true }).limit(30),
       supabase.from("weight_logs").select("weight_kg,logged_on,logged_at").eq("user_id", user.id).order("logged_on", { ascending: false }).limit(30),
       supabase.from("weight_logs").select("weight_kg").eq("user_id", user.id).order("logged_on", { ascending: true }).limit(1).maybeSingle()
     ]);
-    for (const result of [mealResult, stepResult, weightResult, firstWeightResult]) if (result.error) throw result.error;
-    const meals = (mealResult.data || []).map(row => ({
+    for (const result of [mealResult, stepHistoryResult, weightResult, firstWeightResult]) if (result.error) throw result.error;
+    const mealHistory = (mealResult.data || []).map(row => ({
       id: row.id, name: row.title, mealType: row.meal_type, calories: Number(row.calories || 0),
       protein: Number(row.protein || 0), carbs: Number(row.carbs || 0), fats: Number(row.fats || 0),
+      loggedOn: localDateString(new Date(row.logged_at)),
       loggedAt: new Date(row.logged_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    }));
+    const meals = mealHistory.filter(meal => meal.loggedOn === today);
+    const stepHistory = (stepHistoryResult.data || []).map(row => ({
+      loggedOn: row.log_date,
+      day: new Date(`${row.log_date}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" }),
+      steps: Number(row.steps)
     }));
     const history = (weightResult.data || []).slice().reverse().map(row => ({
       loggedOn: row.logged_on,
@@ -179,7 +211,9 @@ export const api = {
     }));
     return {
       meals,
-      steps: stepsFromRow(stepResult.data),
+      mealHistory,
+      stepHistory,
+      steps: stepsFromRow((stepHistoryResult.data || []).find(row => row.log_date === today)),
       history,
       weight: history.at(-1)?.weight,
       startWeight: firstWeightResult.data?.weight_kg == null ? null : Number(firstWeightResult.data.weight_kg)
@@ -195,6 +229,49 @@ export const api = {
       .limit(50);
     if (error) throw error;
     return data || [];
+  },
+
+  exportMyData: async () => {
+    const user = await currentUser();
+    const [profileResult, mealLogs, stepLogs, weightLogs, workoutCompletions, workoutSets, workoutPlanResult, mealPlanResult] = await Promise.all([
+      supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
+      getAllUserRows("meal_logs", user.id, "logged_at"),
+      getAllUserRows("step_logs", user.id, "log_date"),
+      getAllUserRows("weight_logs", user.id, "logged_at"),
+      getAllUserRows("workout_completions", user.id, "created_at"),
+      getAllUserRows("workout_set_logs", user.id, "logged_at"),
+      supabase.from("ai_workout_plans").select("*").eq("user_id", user.id).maybeSingle(),
+      supabase.from("ai_meal_plans").select("*").eq("user_id", user.id).maybeSingle()
+    ]);
+    for (const result of [profileResult, workoutPlanResult, mealPlanResult]) if (result.error) throw result.error;
+    return {
+      format: "rc-trainer-user-data",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      account: { id: user.id, email: user.email, createdAt: user.created_at },
+      profile: profileResult.data,
+      activity: { mealLogs, stepLogs, weightLogs, workoutCompletions, workoutSets },
+      plans: { workout: workoutPlanResult.data, meals: mealPlanResult.data }
+    };
+  },
+
+  deleteAccount: async () => {
+    const { error } = await supabase.functions.invoke("delete-account", {
+      body: { confirmation: "DELETE" }
+    });
+    if (error) {
+      let detail;
+      if (typeof error.context?.json === "function") {
+        try {
+          detail = await error.context.json();
+        } catch (parseError) {
+          throw new Error(`Account deletion failed: ${error.message}. The error response was not valid JSON.`, { cause: parseError });
+        }
+      }
+      throw new Error(detail?.error || error.message || "Account deletion failed.");
+    }
+    const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+    if (signOutError) throw new Error(`Account deleted, but this device could not clear the local session: ${signOutError.message}`);
   },
 
   getOrGenerateWorkoutPlan: async (profile, { force = false } = {}) => {

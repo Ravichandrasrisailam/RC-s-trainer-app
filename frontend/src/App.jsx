@@ -135,6 +135,7 @@ export default function App() {
   const [profile, setProfile] = useState(emptyProfile);
   const [tab, setTab] = useState("overview");
   const [meals, setMeals] = useState([]);
+  const [mealHistory, setMealHistory] = useState([]);
   const [mealText, setMealText] = useState("");
   const [mealBusy, setMealBusy] = useState(false);
   const [mealError, setMealError] = useState("");
@@ -147,8 +148,11 @@ export default function App() {
   const [weight, setWeight] = useState(null);
   const [weightInput, setWeightInput] = useState("");
   const [history, setHistory] = useState([]);
+  const [stepHistory, setStepHistory] = useState([]);
+  const [activityError, setActivityError] = useState("");
   const [startWeight, setStartWeight] = useState(null);
   const [recentSets, setRecentSets] = useState([]);
+  const [recentSetsError, setRecentSetsError] = useState("");
   const [generatedPlan, setGeneratedPlan] = useState(null);
   const [days, setDays] = useState(null);
   const [activeDay, setActiveDay] = useState(0);
@@ -159,6 +163,41 @@ export default function App() {
   const proteinTarget = Number(profile.proteinTargetG ?? profile.proteinTarget) || null;
   const caloriesTarget = Number(profile.caloriesTarget) || null;
   const plan = generatedPlan?.days?.length === days ? generatedPlan : null;
+
+  async function reloadUserHistory(currentProfile = profile) {
+    setActivityError("");
+    setRecentSetsError("");
+    const [activityResult, recentSetsResult] = await Promise.allSettled([
+      api.getActivityData(),
+      api.getRecentSets()
+    ]);
+    if (activityResult.status === "fulfilled") {
+      const activity = activityResult.value;
+      setMeals(activity.meals);
+      setMealHistory(activity.mealHistory);
+      setSteps(activity.steps);
+      setStepsInput(activity.steps == null ? "" : String(activity.steps));
+      setHistory(activity.history);
+      setStepHistory(activity.stepHistory);
+      setStartWeight(activity.startWeight);
+      const currentWeight = activity.weight ?? Number(currentProfile.weightKg);
+      if (Number.isFinite(currentWeight) && currentWeight > 0) {
+        setWeight(currentWeight);
+        setWeightInput(String(currentWeight));
+      }
+    } else {
+      const message = activityResult.reason instanceof Error ? activityResult.reason.message : "Could not load activity history.";
+      setActivityError(message);
+      setToast(`Activity history unavailable: ${message}`);
+    }
+    if (recentSetsResult.status === "fulfilled") {
+      setRecentSets(recentSetsResult.value);
+    } else {
+      const message = recentSetsResult.reason instanceof Error ? recentSetsResult.reason.message : "Could not load recent workout sets.";
+      setRecentSetsError(message);
+      setToast(`Recent workout sets unavailable: ${message}`);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -198,16 +237,20 @@ export default function App() {
       setProfileError("");
       setProfileSaveError("");
       setMeals([]);
+      setMealHistory([]);
       setMealText("");
       setMealPlan(null);
       setGeneratedPlan(null);
       setHistory([]);
+      setStepHistory([]);
+      setActivityError("");
       setSteps(null);
       setStepsInput("");
       setWeight(null);
       setWeightInput("");
       setStartWeight(null);
       setRecentSets([]);
+      setRecentSetsError("");
       setExerciseLogs({});
       return;
     }
@@ -218,42 +261,24 @@ export default function App() {
     setMealPlanBusy(false);
     setGeneratedPlan(null);
     setMeals([]);
+    setMealHistory([]);
     setHistory([]);
+    setStepHistory([]);
+    setActivityError("");
     setSteps(null);
     setStepsInput("");
     setWeight(null);
     setWeightInput("");
     setStartWeight(null);
     setRecentSets([]);
+    setRecentSetsError("");
     api.getProfile().then(async saved => {
       const nextProfile = { ...emptyProfile, ...saved, proteinTarget: saved.proteinTargetG ?? saved.proteinTarget };
       setProfile(nextProfile);
       setDays(nextProfile.trainingDaysPerWeek || null);
       setOnboarded(Boolean(saved.hasOnboarded));
       if (saved.hasOnboarded) {
-        const [activityResult, recentSetsResult] = await Promise.allSettled([
-          api.getActivityData(),
-          api.getRecentSets()
-        ]);
-        if (activityResult.status === "fulfilled") {
-          const activity = activityResult.value;
-          setMeals(activity.meals);
-          setSteps(activity.steps);
-          setStepsInput(activity.steps == null ? "" : String(activity.steps));
-          setHistory(activity.history);
-          setStartWeight(activity.startWeight);
-          const currentWeight = activity.weight ?? Number(nextProfile.weightKg);
-          if (Number.isFinite(currentWeight) && currentWeight > 0) { setWeight(currentWeight); setWeightInput(String(currentWeight)); }
-        } else {
-          const err = activityResult.reason;
-          setToast(err instanceof Error ? `Activity history unavailable: ${err.message}` : "Could not load activity history.");
-        }
-        if (recentSetsResult.status === "fulfilled") {
-          setRecentSets(recentSetsResult.value);
-        } else {
-          const err = recentSetsResult.reason;
-          setToast(err instanceof Error ? `Recent workout sets unavailable: ${err.message}` : "Could not load recent workout sets.");
-        }
+        await reloadUserHistory(nextProfile);
         try { setGeneratedPlan(await api.getOrGenerateWorkoutPlan(nextProfile)); }
         catch (err) { setToast(err instanceof Error ? `Workout plan unavailable: ${err.message}` : "Could not load your workout plan."); }
         setMealPlanBusy(true);
@@ -305,10 +330,10 @@ export default function App() {
     finally { setWorkoutPlanBusy(false); }
   }
   async function logPlannedMeal(meal) {
-    try { const saved = await api.logMeal({ ...meal, mealType: meal.mealType || "Meal" }); setMeals(prev => [saved, ...prev]); setToast("Suggested meal added to today’s log."); }
+    try { const saved = await api.logMeal({ ...meal, mealType: meal.mealType || "Meal" }); setMeals(prev => [saved, ...prev]); setMealHistory(prev => [saved, ...prev]); setToast("Suggested meal added to today’s log."); }
     catch (err) { setToast(err instanceof Error ? `Meal was not saved: ${err.message}` : "Meal could not be saved."); }
   }
-  async function addMeal() { if (!mealText.trim()) return; setMealBusy(true); setMealError(""); try { const estimate = await api.estimateMeal(mealText); const meal = await api.logMeal({ ...estimate, mealType: "Meal" }); setMeals(prev => [...prev, meal]); setMealText(""); setToast("Meal added to today's log"); } catch (e) { setMealError(e instanceof Error ? e.message : "Could not estimate this meal. Check the API connection."); } finally { setMealBusy(false); } }
+  async function addMeal() { if (!mealText.trim()) return; setMealBusy(true); setMealError(""); try { const estimate = await api.estimateMeal(mealText); const meal = await api.logMeal({ ...estimate, mealType: "Meal" }); setMeals(prev => [...prev, meal]); setMealHistory(prev => [meal, ...prev]); setMealText(""); setToast("Meal added to today's log"); } catch (e) { setMealError(e instanceof Error ? e.message : "Could not estimate this meal. Check the API connection."); } finally { setMealBusy(false); } }
   async function addWeight() {
     const value = Number(weightInput);
     if (!isWeightKg(value)) { setToast("Enter a weight between 30 and 300 kg."); return; }
@@ -324,6 +349,7 @@ export default function App() {
       setWeight(savedWeight);
       setWeightInput(String(savedWeight));
       setHistory(current => [...current.filter(item => item.loggedOn !== loggedOn), entry].sort((a, b) => a.loggedOn.localeCompare(b.loggedOn)).slice(-30));
+      setActivityError("");
       setStartWeight(current => current == null ? savedWeight : current);
       setToast("Weight entry saved");
     } catch (err) {
@@ -338,6 +364,13 @@ export default function App() {
       const saved = await api.logSteps(value);
       setSteps(Number(saved.steps));
       setStepsInput(String(saved.steps));
+      const loggedOn = saved.log_date;
+      setStepHistory(current => [...current.filter(item => item.loggedOn !== loggedOn), {
+        loggedOn,
+        day: new Date(`${loggedOn}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" }),
+        steps: Number(saved.steps)
+      }].sort((a, b) => a.loggedOn.localeCompare(b.loggedOn)));
+      setActivityError("");
       setToast("Today’s steps saved.");
     } catch (err) {
       setToast(err instanceof Error ? `Steps were not saved: ${err.message}` : "Steps could not be saved.");
@@ -351,6 +384,31 @@ export default function App() {
       setToast(error instanceof Error ? `Could not sign out: ${error.message}` : "Could not sign out.");
     }
   }
+  async function exportData() {
+    try {
+      const data = await api.exportMyData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `rc-trainer-data-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setToast("Your account data export was downloaded.");
+    } catch (error) {
+      setToast(error instanceof Error ? `Data export failed: ${error.message}` : "Data export failed.");
+      throw error;
+    }
+  }
+  async function deleteAccount() {
+    try {
+      await api.deleteAccount();
+      setAuthenticated(false);
+    } catch (error) {
+      setToast(error instanceof Error ? `Account deletion failed: ${error.message}` : "Account deletion failed.");
+      throw error;
+    }
+  }
   if (!authReady) return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">RC TRAINER</div><h1>Restoring your session.</h1><p className="muted">Checking your secure Supabase session.</p></section></main>;
   if (passwordRecovery) return <PasswordRecoveryScreen onComplete={() => { setPasswordRecovery(false); setToast("Password updated."); }} />;
   if (!authenticated) return <AuthScreen initialError={authError} />;
@@ -358,7 +416,7 @@ export default function App() {
   if (profileError) return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">PROFILE UNAVAILABLE</div><h1>We couldn't load your profile.</h1><p className="error">{profileError}</p><button className="primary full" onClick={() => window.location.reload()}>Try again</button><button className="secondary full" onClick={signOut}>Sign in again</button></section></main>;
   if (!onboarded) return <Onboarding profile={profile} onSave={saveProfile} error={profileSaveError} />;
   const pageTitle = { overview: "Your overview", nutrition: "Nutrition", training: "Training plan", progress: "Your progress", profile: "Profile" }[tab];
-  const page = { overview: <DashboardPage profile={profile} steps={steps} weight={weight} totals={totals} proteinTarget={proteinTarget} caloriesTarget={caloriesTarget} history={history} startWeight={startWeight} plan={plan} activeDay={activeDay} onNavigate={setTab} />, nutrition: <MealsPage meals={meals} totals={totals} proteinTarget={proteinTarget} caloriesTarget={caloriesTarget} mealText={mealText} setMealText={setMealText} mealBusy={mealBusy} mealError={mealError} addMeal={addMeal} mealPlan={mealPlan} mealPlanBusy={mealPlanBusy} generateMealPlan={generateMealPlan} mealPlanError={mealPlanError} logPlannedMeal={logPlannedMeal} />, training: <TrainingPage days={days} setDays={setDays} onDaysChange={changeTrainingDays} plan={plan} activeDay={activeDay} workoutPlanBusy={workoutPlanBusy} regenerateWorkoutPlan={regenerateWorkoutPlan} setActiveDay={setActiveDay} exerciseLogs={exerciseLogs} setExerciseLogs={setExerciseLogs} recentSets={recentSets} setRecentSets={setRecentSets} setToast={setToast} />, progress: <ProgressPage weight={weight} weightInput={weightInput} setWeightInput={setWeightInput} addWeight={addWeight} steps={steps} stepsInput={stepsInput} setStepsInput={setStepsInput} saveSteps={saveSteps} history={history} setToast={setToast} />, profile: <ProfilePage profile={profile} onSave={saveProfile} /> }[tab];
+  const page = { overview: <DashboardPage profile={profile} steps={steps} weight={weight} totals={totals} proteinTarget={proteinTarget} caloriesTarget={caloriesTarget} history={history} startWeight={startWeight} plan={plan} activeDay={activeDay} onNavigate={setTab} activityError={activityError} onRetryActivity={reloadUserHistory} />, nutrition: <MealsPage meals={meals} activityError={activityError} onRetryActivity={reloadUserHistory} totals={totals} proteinTarget={proteinTarget} caloriesTarget={caloriesTarget} mealText={mealText} setMealText={setMealText} mealBusy={mealBusy} mealError={mealError} addMeal={addMeal} mealPlan={mealPlan} mealPlanBusy={mealPlanBusy} generateMealPlan={generateMealPlan} mealPlanError={mealPlanError} logPlannedMeal={logPlannedMeal} />, training: <TrainingPage days={days} setDays={setDays} onDaysChange={changeTrainingDays} plan={plan} activeDay={activeDay} workoutPlanBusy={workoutPlanBusy} regenerateWorkoutPlan={regenerateWorkoutPlan} setActiveDay={setActiveDay} exerciseLogs={exerciseLogs} setExerciseLogs={setExerciseLogs} recentSets={recentSets} recentSetsError={recentSetsError} onRetryHistory={reloadUserHistory} setRecentSets={setRecentSets} setToast={setToast} />, progress: <ProgressPage weight={weight} weightInput={weightInput} setWeightInput={setWeightInput} addWeight={addWeight} steps={steps} stepsInput={stepsInput} setStepsInput={setStepsInput} saveSteps={saveSteps} history={history} mealHistory={mealHistory} stepHistory={stepHistory} activityError={activityError} onRetryActivity={reloadUserHistory} setToast={setToast} />, profile: <ProfilePage profile={profile} onSave={saveProfile} onExportData={exportData} onDeleteAccount={deleteAccount} /> }[tab];
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div>
@@ -379,7 +437,7 @@ export default function App() {
         <button className="date-pill"><Activity size={15} /> Today <ChevronDown size={14} /></button>
       </header>
       <Suspense fallback={<section className="content"><p className="muted">Loading…</p></section>}>{page}</Suspense>
-      <footer className="footer"><span>RC TRAINER</span><span>Progress over perfection.</span></footer>
+      <footer className="footer"><span>RC TRAINER</span><span>Progress over perfection.</span><span data-testid="build-commit">Build {__APP_COMMIT__.slice(0, 7)}</span></footer>
     </main>
     <nav className="mobile-nav">{nav.map(n => <button key={n.id} className={tab === n.id ? "mobile-item active" : "mobile-item"} onClick={() => setTab(n.id)}><n.icon size={19} /><span>{n.label}</span></button>)}</nav>
     {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}

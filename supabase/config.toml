@@ -2,3 +2,6 @@ project_id = "rc-trainer-app"
 
 [functions.generate-plan]
 verify_jwt = true
+
+[functions.delete-account]
+verify_jwt = true

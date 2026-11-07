@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isProviderTimeout } from "./provider-errors.js";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -115,20 +116,29 @@ Deno.serve(async (req: Request) => {
 
     const model = Deno.env.get("CLOUDFLARE_AI_MODEL") || "@cf/meta/llama-3.1-8b-instruct";
     const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model.split("/").map(encodeURIComponent).join("/")}`;
-    const result = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: "You create safe, practical fitness and nutrition data. Return valid JSON only, with no markdown or commentary." },
-          { role: "user", content: prompt }
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.35,
-        max_tokens: 5000
-      }),
-      signal: AbortSignal.timeout(30_000)
-    });
+    let result: Response;
+    try {
+      result = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: "You create safe, practical fitness and nutrition data. Return valid JSON only, with no markdown or commentary." },
+            { role: "user", content: prompt }
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.35,
+          max_tokens: 5000
+        }),
+        signal: AbortSignal.timeout(30_000)
+      });
+    } catch (error) {
+      if (isProviderTimeout(error)) {
+        console.error("Workers AI request timed out");
+        return respond({ error: "The AI provider took too long to respond. Please try again in a moment." }, 504);
+      }
+      throw error;
+    }
     if (!result.ok) {
       const detail = await result.text();
       console.error("Workers AI request failed", result.status, detail.slice(0, 500));
