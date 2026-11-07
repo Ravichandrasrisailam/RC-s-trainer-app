@@ -169,3 +169,14 @@ body{overflow-x:hidden}
   .mobile-nav{padding-left:3px;padding-right:3px}
   .mobile-item{font-size:8px}
 }
+
+.history-error{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.history-list{display:grid;gap:0}
+.history-row{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;padding:14px 0;border-bottom:1px solid var(--line)}
+.history-row:last-child{border-bottom:0}
+.history-row>div{display:grid;gap:5px}
+.history-meals{display:grid;gap:5px;text-align:right}
+.danger-button{min-height:44px;padding:0 16px;border:1px solid #793c37;border-radius:12px;background:#3a201e;color:#ffd9d4;font-weight:700}
+.danger-button:hover:not(:disabled){background:#512824}
+.account-danger{border-color:#56342f}
+@media(max-width:640px){.history-row{display:grid;gap:8px}.history-meals{text-align:left}}

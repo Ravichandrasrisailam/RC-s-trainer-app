@@ -1,8 +1,12 @@
 .env
+.env.local
+.env.*.local
 **/node_modules/
 **/dist/
 **/target/
+tools/maven/
 .idea/
 .vscode/
 .DS_Store
 *.log
+.vercel

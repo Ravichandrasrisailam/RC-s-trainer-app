@@ -1,18 +1,51 @@
 import { Check, CircleHelp, Dumbbell } from "lucide-react";
 import { PageIntro } from "../components/ui";
 import { api } from "../api";
+import { isWorkoutSet } from "../lib/validation";
 
-export default function TrainingPage({ days, setDays, plan, activeDay, setActiveDay, exerciseLogs, setExerciseLogs, setToast }) {
-  async function saveSet(exercise) {
+export default function TrainingPage({ days, setDays, onDaysChange, plan, activeDay, workoutPlanBusy, regenerateWorkoutPlan, setActiveDay, exerciseLogs, setExerciseLogs, recentSets, recentSetsError, onRetryHistory, setRecentSets, setToast }) {
+  async function saveSet(exercise, day) {
     const entry = exerciseLogs[exercise.name];
-    if (!entry?.weight || !entry?.reps) return;
+    if (!entry || !isWorkoutSet(entry)) {
+      setToast("Enter a valid set: load 0–1,500 kg and 1–100 whole reps.");
+      return;
+    }
     try {
-      await api.logWorkoutSet(exercise.name, entry.weight, entry.reps);
+      const saved = await api.logWorkoutSet(exercise.name, day, entry.weight, entry.reps);
+      setRecentSets(current => [saved, ...current.filter(item => item.id !== saved.id)].slice(0, 50));
+      setExerciseLogs(current => {
+        const next = { ...current };
+        delete next[exercise.name];
+        return next;
+      });
       setToast(`${exercise.name} set saved`);
-    } catch {
-      setToast(`${exercise.name} set updated locally; sync unavailable`);
+    } catch (error) {
+      setToast(error instanceof Error ? `Set was not saved: ${error.message}` : "Set could not be saved.");
     }
   }
 
-  return <div className="content"><PageIntro eyebrow="TRAIN WITH INTENTION" title="Your training plan." description="Choose a weekly split and log each working set."><div className="goal-chip"><Dumbbell size={15} /> Workout builder</div></PageIntro><section className="panel"><div className="panel-heading"><div><h3>Choose your split</h3><p className="muted">Select how many days you can train each week.</p></div></div><div className="split-options">{[3, 4, 5, 6].map(n => <button className={days === n ? "split-option active" : "split-option"} key={n} onClick={() => { setDays(n); setActiveDay(0); }}><strong>{n}</strong><span>days / week</span></button>)}</div><div className="day-tabs">{plan.days.map((d, i) => <button className={activeDay === i ? "day-tab active" : "day-tab"} onClick={() => setActiveDay(i)} key={d}>{d}</button>)}</div><div className="exercise-list">{plan.exercises.map((ex, i) => <div className="exercise-row" key={ex.name}><div className="exercise-index">{String(i + 1).padStart(2, "0")}</div><div className="exercise-info"><strong>{ex.name}</strong><span className="muted">{ex.muscle} · {ex.equipment} · {ex.sets} sets × {ex.repRange}</span></div><div className="exercise-inputs"><input aria-label={`${ex.name} weight in kg`} placeholder="kg" type="number" min="0" value={exerciseLogs[ex.name]?.weight ?? ""} onChange={e => setExerciseLogs({ ...exerciseLogs, [ex.name]: { weight: e.target.value, reps: exerciseLogs[ex.name]?.reps ?? "" } })} /><input aria-label={`${ex.name} reps`} placeholder="reps" type="number" min="0" value={exerciseLogs[ex.name]?.reps ?? ""} onChange={e => setExerciseLogs({ ...exerciseLogs, [ex.name]: { weight: exerciseLogs[ex.name]?.weight ?? "", reps: e.target.value } })} /><button className="log-set" title="Save set" onClick={() => saveSet(ex)}><Check size={16} /></button></div></div>)}</div><p className="muted helper-note"><CircleHelp size={14} /> Your saved sets are stored with your Supabase account.</p></section></div>;
+  const selectedDay = plan?.days?.[activeDay % (plan.days.length || 1)];
+  const dayName = typeof selectedDay === "string" ? selectedDay : selectedDay?.name;
+  const exercises = selectedDay && (typeof selectedDay === "string" ? plan.exercises : selectedDay.exercises);
+
+  return <div className="content">
+    <PageIntro eyebrow="TRAIN WITH INTENTION" title="Your training plan." description="Your saved schedule and AI-generated exercises appear here."><div className="goal-chip"><Dumbbell size={15} /> {plan ? "Personalized AI plan" : "No plan generated"}</div></PageIntro>
+    <section className="panel">
+      <div className="panel-heading"><div><h3>Weekly schedule</h3><p className="muted">Your selected training days are saved in your profile.</p></div></div>
+      <div className="split-options">{[3, 4, 5, 6].map(n => <button className={days === n ? "split-option active" : "split-option"} key={n} onClick={() => { onDaysChange ? onDaysChange(n) : setDays(n); setActiveDay(0); }}><strong>{n}</strong><span>days / week</span></button>)}</div>
+      {plan ? <>
+        <div className="day-tabs">{plan.days.map((day, i) => { const label = typeof day === "string" ? day : day.name; return <button className={activeDay === i ? "day-tab active" : "day-tab"} onClick={() => setActiveDay(i)} key={label}>{label}</button>; })}</div>
+        <div className="exercise-list">{(exercises || []).map((ex, i) => { const lastSet = recentSets.find(item => item.exercise_name.toLowerCase() === ex.name.toLowerCase()); return <div className="exercise-row" key={`${dayName}-${ex.name}`}><div className="exercise-index">{String(i + 1).padStart(2, "0")}</div><div className="exercise-info"><strong>{ex.name}</strong><span className="muted">{ex.muscle} · {ex.equipment} · {ex.sets} sets × {ex.repRange}</span><span className="muted">{lastSet ? `Last logged: ${Number(lastSet.load_kg).toLocaleString()} kg × ${lastSet.reps} reps` : "No sets logged for this exercise yet."}</span></div><div className="exercise-inputs"><input aria-label={`${ex.name} weight in kg`} placeholder="kg" type="number" min="0" value={exerciseLogs[ex.name]?.weight ?? ""} onChange={e => setExerciseLogs({ ...exerciseLogs, [ex.name]: { weight: e.target.value, reps: exerciseLogs[ex.name]?.reps ?? "" } })} /><input aria-label={`${ex.name} reps`} placeholder="reps" type="number" min="1" value={exerciseLogs[ex.name]?.reps ?? ""} onChange={e => setExerciseLogs({ ...exerciseLogs, [ex.name]: { weight: exerciseLogs[ex.name]?.weight ?? "", reps: e.target.value } })} /><button className="log-set" title="Save set" onClick={() => saveSet(ex, dayName)}><Check size={16} /></button></div></div>; })}</div>
+        <p className="muted helper-note"><CircleHelp size={14} /> {typeof selectedDay !== "string" && selectedDay?.focus ? `Focus: ${selectedDay.focus}. ` : ""}Saved sets are stored with your Supabase account.</p>
+      </> : <div className="empty-state"><p className="muted">{workoutPlanBusy ? "Generating a workout plan from your saved profile…" : "Your workout plan is empty until you generate a personalized plan."}</p><button className="primary" disabled={workoutPlanBusy} onClick={regenerateWorkoutPlan}>{workoutPlanBusy ? "Generating…" : "Generate AI workout plan"}</button></div>}
+    </section>
+    <section className="panel">
+      <div className="panel-heading"><div><h3>Workout history</h3><p className="muted">Your 50 most recent saved sets.</p></div></div>
+      {recentSetsError
+        ? <p className="error history-error" role="alert">Workout history could not be loaded: {recentSetsError} <button className="text-button" onClick={() => onRetryHistory()}>Try again</button></p>
+        : recentSets.length === 0
+          ? <p className="muted">No workout sets logged yet. Saved sets will appear here.</p>
+          : <div className="history-list">{recentSets.map(set => <article className="history-row" key={set.id}><div><strong>{set.exercise_name}</strong><span className="muted">{set.workout_day} · {new Date(set.logged_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</span></div><strong>{Number(set.load_kg).toLocaleString()} kg × {set.reps} reps</strong></article>)}</div>}
+    </section>
+  </div>;
 }
