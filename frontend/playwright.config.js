@@ -14,6 +14,9 @@ export default defineConfig({
   use: {
     baseURL: remoteBaseUrl || "http://127.0.0.1:5173",
     trace: "retain-on-failure",
+    extraHTTPHeaders: process.env.VERCEL_AUTOMATION_BYPASS_SECRET
+      ? { "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET }
+      : undefined,
     ...devices["Desktop Chrome"]
   },
   webServer: remoteBaseUrl ? undefined : {

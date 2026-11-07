@@ -16,6 +16,7 @@ jobs:
       PLAYWRIGHT_BASE_URL: ${{ secrets.E2E_BASE_URL }}
       E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
       E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,6 +25,6 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: test -n "$PLAYWRIGHT_BASE_URL" && test -n "$E2E_USER_EMAIL" && test -n "$E2E_USER_PASSWORD"
+      - run: test -n "$PLAYWRIGHT_BASE_URL" && test -n "$E2E_USER_EMAIL" && test -n "$E2E_USER_PASSWORD" && test -n "$VERCEL_AUTOMATION_BYPASS_SECRET"
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
