@@ -84,19 +84,38 @@ Deno.serve(async (req: Request) => {
     if (!description) return respond({ error: "Describe the meal first." }, 400);
     prompt = `Estimate nutrition for the described meal and portion. Respond only with JSON keys name, calories, protein, carbs, fats, fiber. Calories are kcal and all macros are grams. Values must be non-negative numbers. Be conservative and state estimate in name. This is approximate, not medical advice. Meal: ${description}`;
   } else if (task === "generate-meals") {
-    const { data: profile, error } = await supabase.from("profiles").select("goal,activity_level,training_days_per_week,height_cm,weight_kg,protein_target_g,calories_target").eq("id", userData.user.id).maybeSingle();
+    const { data: profile, error } = await supabase.from("profiles").select("goal,activity_level,training_days_per_week,height_cm,weight_kg,protein_target_g,calories_target,dietary_preference,workout_timing").eq("id", userData.user.id).maybeSingle();
     if (error) return respond({ error: "Could not load your saved profile." }, 400);
     if (!profile || !profile.goal) return respond({ error: "Save your profile before generating meals." }, 400);
-    prompt = `Create a practical one-day meal plan personalized for this saved user profile: goal=${profile.goal}; activity level=${profile.activity_level}; training days per week=${profile.training_days_per_week}; weight kg=${profile.weight_kg}; height cm=${profile.height_cm}; protein target grams=${profile.protein_target_g}; calorie target kcal=${profile.calories_target}. Respond ONLY with JSON keys label and meals. Include 3-5 realistic meals that respect the user's goal and protein target, use common ingredients, state portion clearly, and include mealType, calories, protein, carbs, fats, fiber (all non-negative numbers; macros in grams), portion, and a brief preparation note. Avoid medical claims, extreme calorie restriction, and supplements as requirements. These are estimates, not medical advice.`;
+    const diet = (typeof requestBody.diet === "string" ? requestBody.diet : profile.dietary_preference) || "NON_VEG";
+    const timing = (typeof requestBody.timing === "string" ? requestBody.timing : profile.workout_timing) || "EVENING";
+    prompt = `Create a practical, macro-balanced one-day meal plan personalized for this saved user profile: goal=${profile.goal}; activity level=${profile.activity_level}; training days per week=${profile.training_days_per_week}; weight kg=${profile.weight_kg}; height cm=${profile.height_cm}; protein target grams=${profile.protein_target_g}; calorie target kcal=${profile.calories_target}; dietary preference=${diet}; workout timing=${timing}.
+    Incorporate balanced, nutritious staples:
+    - Include rice, fresh curd / yogurt, dal / lentils, vegetables, chapati / bread, salads.
+    - If VEG/VEGAN: paneer, tofu, soya chunks, dal, curd/yogurt, sprouts.
+    - If NON_VEG/EGGETARIAN: lean chicken, fish, prawns, eggs, mutton.
+    - Structure around the ${timing} gym session with pre-workout and post-workout timing and timestamps (e.g. 06:30 AM, 08:30 AM, 01:00 PM, 05:00 PM, 08:30 PM).
+    Respond ONLY with JSON keys label and meals. Include 4-5 realistic meals that respect the user's goal and protein target, use common ingredients, state portion clearly, and include mealType, time, calories, protein, carbs, fats, fiber (all non-negative numbers; macros in grams), portion, and a brief preparation note. Avoid medical claims. These are estimates, not medical advice.`;
   } else if (task === "generate-workout") {
     const { data: profile, error } = await supabase.from("profiles")
-      .select("goal,activity_level,training_days_per_week,height_cm,weight_kg")
+      .select("goal,activity_level,training_days_per_week,height_cm,weight_kg,equipment_access,injuries_or_conditions")
       .eq("id", userData.user.id).maybeSingle();
     if (error) return respond({ error: "Could not load your saved profile." }, 400);
     if (!profile || !profile.training_days_per_week) return respond({ error: "Save your profile before generating a workout." }, 400);
     const days = Number(profile.training_days_per_week);
     if (days < 3 || days > 6) return respond({ error: "Training days must be between 3 and 6." }, 400);
-    prompt = `Create a safe, practical weekly workout plan personalized to this saved user profile: goal=${profile.goal}; activity level=${profile.activity_level}; training days per week=${days}; body weight kg=${profile.weight_kg}; height cm=${profile.height_cm}. Return ONLY JSON with keys label and days. days must have EXACTLY ${days} objects. Each day object has name, focus, and exercises. Include 4-6 exercises per day, balanced recovery across the week, beginner-appropriate progression, and no medical diagnosis or extreme training. Each exercise must have name, muscle, equipment, sets (integer 2-4), and repRange (short string). Do not add extra root keys.`;
+    const equipment = (typeof requestBody.equipment === "string" ? requestBody.equipment : profile.equipment_access) || "FULL_GYM";
+    const injuries = (typeof requestBody.injuries === "string" ? requestBody.injuries : profile.injuries_or_conditions) || "";
+    prompt = `Create a safe, evidence-based scientific weekly workout plan personalized to this saved user profile: goal=${profile.goal}; activity level=${profile.activity_level}; training days per week=${days}; body weight kg=${profile.weight_kg}; height cm=${profile.height_cm}; equipment available=${equipment}; reported injuries="${injuries}".
+    Follow evidence-based resistance training principles:
+    - Exercise selection matched to available equipment: ${equipment}.
+    - Compound mechanical tension with 1-2 RIR followed by hypertrophy isolation.
+    - If injury reported, choose joint-friendly biomechanically sound variations.
+    Return ONLY JSON with keys label and days. days must have EXACTLY ${days} objects. Each day object has name, focus, and exercises. Include 4-6 exercises per day, balanced recovery across the week, beginner-to-intermediate progression. Each exercise must have name, muscle, equipment, sets (integer 2-4), and repRange (short string). Do not add extra root keys.`;
+  }
+  - Compound mechanical tension with 1 - 2 RIR followed by hypertrophy isolation.
+    - If injury reported, choose joint - friendly biomechanically sound variations.
+    Return ONLY JSON with keys label and days.days must have EXACTLY ${ days } objects.Each day object has name, focus, and exercises.Include 4 - 6 exercises per day, balanced recovery across the week, beginner - to - intermediate progression.Each exercise must have name, muscle, equipment, sets(integer 2 - 4), and repRange(short string).Do not add extra root keys.`;
   } else {
     return respond({ error: "Unsupported AI task." }, 400);
   }
@@ -116,94 +135,94 @@ Deno.serve(async (req: Request) => {
 
     const model = Deno.env.get("CLOUDFLARE_AI_MODEL") || "@cf/meta/llama-3.1-8b-instruct";
     const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model.split("/").map(encodeURIComponent).join("/")}`;
-    let result: Response;
-    try {
-      result = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: "You create safe, practical fitness and nutrition data. Return valid JSON only, with no markdown or commentary." },
-            { role: "user", content: prompt }
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.35,
-          max_tokens: 5000
-        }),
-        signal: AbortSignal.timeout(30_000)
-      });
-    } catch (error) {
-      if (isProviderTimeout(error)) {
-        console.error("Workers AI request timed out");
-        return respond({ error: "The AI provider took too long to respond. Please try again in a moment." }, 504);
-      }
-      throw error;
-    }
-    if (!result.ok) {
-      const detail = await result.text();
-      console.error("Workers AI request failed", result.status, detail.slice(0, 500));
-      if (result.status === 429) return respond({ error: "The free AI allowance is temporarily exhausted. Please try again after the daily quota resets." }, 429);
-      return respond({ error: "The AI provider could not generate a response. Check the Cloudflare Workers AI account and token." }, 502);
-    }
-    const resultBody: unknown = await result.json();
-    if (!isRecord(resultBody)) throw new Error("Workers AI returned an invalid response");
-    if (resultBody?.success === false) throw new Error("Workers AI returned an unsuccessful response");
-    const providerResult = resultBody.result;
-    const generated = isRecord(providerResult) ? providerResult.response ?? providerResult : providerResult;
-    const providerResponse: unknown = typeof generated === "string" ? JSON.parse(generated) : generated;
-    let parsed: unknown = providerResponse;
-    if (task === "generate-meals") {
-      const { normalizeMealPlan } = await import("./response-normalizers.js");
-      parsed = normalizeMealPlan(providerResponse);
-      if (!parsed) {
-        console.error("Workers AI meal-plan response shape was rejected", describeMealPlanResponseShape(providerResponse));
-        throw new Error("Workers AI returned an unsupported meal-plan shape");
-      }
-    }
-    if (!isRecord(parsed)) throw new Error("Invalid JSON response");
-    if (task === "estimate-meal") {
-      for (const key of ["calories", "protein", "carbs", "fats", "fiber"]) {
-        if (!isNutritionValue(parsed[key])) throw new Error("Invalid nutrition values");
-      }
-      if (typeof parsed.name !== "string" || !parsed.name.trim() || parsed.name.length > 180) throw new Error("Invalid meal name");
-      return respond({ estimate: parsed });
-    }
-    if (task === "generate-meals") {
-      if (typeof parsed.label !== "string" || !parsed.label.trim() || parsed.label.length > 120
-        || !Array.isArray(parsed.meals) || parsed.meals.length < 3 || parsed.meals.length > 5) throw new Error("Invalid meal plan shape");
-      for (const meal of parsed.meals) {
-        if (!isRecord(meal) || typeof meal.name !== "string" || !meal.name.trim() || meal.name.length > 180
-          || typeof meal.mealType !== "string" || !meal.mealType.trim() || meal.mealType.length > 40
-          || typeof meal.portion !== "string" || !meal.portion.trim() || meal.portion.length > 200
-          || typeof meal.preparation !== "string" || meal.preparation.length > 500) throw new Error("Invalid meal details");
-        for (const key of ["calories", "protein", "carbs", "fats", "fiber"]) if (!isNutritionValue(meal[key])) throw new Error("Invalid meal macros");
-      }
-      return respond({ mealPlan: parsed });
-    }
-    if (typeof parsed.label !== "string" || !parsed.label.trim() || parsed.label.length > 120 || !Array.isArray(parsed.days)) {
-      throw new Error("Invalid plan shape");
-    }
-    const { data: savedProfile, error: savedProfileError } = await supabase.from("profiles")
-      .select("training_days_per_week").eq("id", userData.user.id).single();
-    if (savedProfileError || !savedProfile) throw new Error("Could not verify the saved training schedule");
-    const expectedDays = Number(savedProfile.training_days_per_week);
-    if (parsed.days.length !== expectedDays || parsed.days.some((day: unknown) => {
-      if (!isRecord(day) || typeof day.name !== "string" || !day.name.trim() || day.name.length > 80
-        || typeof day.focus !== "string" || day.focus.length > 300 || !Array.isArray(day.exercises)
-        || day.exercises.length < 3 || day.exercises.length > 8) return true;
-      return day.exercises.some((exercise: unknown) =>
-        !isRecord(exercise) || typeof exercise.name !== "string" || !exercise.name.trim() || exercise.name.length > 120
-        || typeof exercise.muscle !== "string" || exercise.muscle.length > 60
-        || typeof exercise.equipment !== "string" || exercise.equipment.length > 60
-        || typeof exercise.repRange !== "string" || exercise.repRange.length > 30
-        || !Number.isInteger(exercise.sets) || Number(exercise.sets) < 2 || Number(exercise.sets) > 4
-      );
-    })) {
-      throw new Error("The generated plan did not match the saved training schedule");
-    }
-    return respond({ plan: parsed });
+  let result: Response;
+  try {
+    result = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: "You create safe, practical fitness and nutrition data. Return valid JSON only, with no markdown or commentary." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.35,
+        max_tokens: 5000
+      }),
+      signal: AbortSignal.timeout(30_000)
+    });
   } catch (error) {
-    console.error("AI generation failed", error);
-    return respond({ error: "Could not produce a valid personalized plan. Please try again." }, 502);
+    if (isProviderTimeout(error)) {
+      console.error("Workers AI request timed out");
+      return respond({ error: "The AI provider took too long to respond. Please try again in a moment." }, 504);
+    }
+    throw error;
   }
+  if (!result.ok) {
+    const detail = await result.text();
+    console.error("Workers AI request failed", result.status, detail.slice(0, 500));
+    if (result.status === 429) return respond({ error: "The free AI allowance is temporarily exhausted. Please try again after the daily quota resets." }, 429);
+    return respond({ error: "The AI provider could not generate a response. Check the Cloudflare Workers AI account and token." }, 502);
+  }
+  const resultBody: unknown = await result.json();
+  if (!isRecord(resultBody)) throw new Error("Workers AI returned an invalid response");
+  if (resultBody?.success === false) throw new Error("Workers AI returned an unsuccessful response");
+  const providerResult = resultBody.result;
+  const generated = isRecord(providerResult) ? providerResult.response ?? providerResult : providerResult;
+  const providerResponse: unknown = typeof generated === "string" ? JSON.parse(generated) : generated;
+  let parsed: unknown = providerResponse;
+  if (task === "generate-meals") {
+    const { normalizeMealPlan } = await import("./response-normalizers.js");
+    parsed = normalizeMealPlan(providerResponse);
+    if (!parsed) {
+      console.error("Workers AI meal-plan response shape was rejected", describeMealPlanResponseShape(providerResponse));
+      throw new Error("Workers AI returned an unsupported meal-plan shape");
+    }
+  }
+  if (!isRecord(parsed)) throw new Error("Invalid JSON response");
+  if (task === "estimate-meal") {
+    for (const key of ["calories", "protein", "carbs", "fats", "fiber"]) {
+      if (!isNutritionValue(parsed[key])) throw new Error("Invalid nutrition values");
+    }
+    if (typeof parsed.name !== "string" || !parsed.name.trim() || parsed.name.length > 180) throw new Error("Invalid meal name");
+    return respond({ estimate: parsed });
+  }
+  if (task === "generate-meals") {
+    if (typeof parsed.label !== "string" || !parsed.label.trim() || parsed.label.length > 120
+      || !Array.isArray(parsed.meals) || parsed.meals.length < 3 || parsed.meals.length > 5) throw new Error("Invalid meal plan shape");
+    for (const meal of parsed.meals) {
+      if (!isRecord(meal) || typeof meal.name !== "string" || !meal.name.trim() || meal.name.length > 180
+        || typeof meal.mealType !== "string" || !meal.mealType.trim() || meal.mealType.length > 40
+        || typeof meal.portion !== "string" || !meal.portion.trim() || meal.portion.length > 200
+        || typeof meal.preparation !== "string" || meal.preparation.length > 500) throw new Error("Invalid meal details");
+      for (const key of ["calories", "protein", "carbs", "fats", "fiber"]) if (!isNutritionValue(meal[key])) throw new Error("Invalid meal macros");
+    }
+    return respond({ mealPlan: parsed });
+  }
+  if (typeof parsed.label !== "string" || !parsed.label.trim() || parsed.label.length > 120 || !Array.isArray(parsed.days)) {
+    throw new Error("Invalid plan shape");
+  }
+  const { data: savedProfile, error: savedProfileError } = await supabase.from("profiles")
+    .select("training_days_per_week").eq("id", userData.user.id).single();
+  if (savedProfileError || !savedProfile) throw new Error("Could not verify the saved training schedule");
+  const expectedDays = Number(savedProfile.training_days_per_week);
+  if (parsed.days.length !== expectedDays || parsed.days.some((day: unknown) => {
+    if (!isRecord(day) || typeof day.name !== "string" || !day.name.trim() || day.name.length > 80
+      || typeof day.focus !== "string" || day.focus.length > 300 || !Array.isArray(day.exercises)
+      || day.exercises.length < 3 || day.exercises.length > 8) return true;
+    return day.exercises.some((exercise: unknown) =>
+      !isRecord(exercise) || typeof exercise.name !== "string" || !exercise.name.trim() || exercise.name.length > 120
+      || typeof exercise.muscle !== "string" || exercise.muscle.length > 60
+      || typeof exercise.equipment !== "string" || exercise.equipment.length > 60
+      || typeof exercise.repRange !== "string" || exercise.repRange.length > 30
+      || !Number.isInteger(exercise.sets) || Number(exercise.sets) < 2 || Number(exercise.sets) > 4
+    );
+  })) {
+    throw new Error("The generated plan did not match the saved training schedule");
+  }
+  return respond({ plan: parsed });
+} catch (error) {
+  console.error("AI generation failed", error);
+  return respond({ error: "Could not produce a valid personalized plan. Please try again." }, 502);
+}
 });

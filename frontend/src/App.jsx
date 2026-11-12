@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Activity, Apple, BarChart3, ChevronDown, Dumbbell, Home, LogOut } from "lucide-react";
+import { Activity, Apple, BarChart3, ChevronDown, Clock, Dumbbell, Eye, EyeOff, Home, LogOut, Paperclip, Sparkles } from "lucide-react";
 import { api } from "./api";
 import { emptyProfile } from "./data";
 import { authErrorMessage } from "./lib/auth";
+import { calculateRecommendedTargets, localDateString } from "./lib/activity";
 import { isStepCount, isWeightKg } from "./lib/validation";
 import { supabase } from "./supabaseClient";
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
@@ -14,9 +15,11 @@ const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 function AuthScreen({ initialError = "" }) {
   const [mode, setMode] = useState("register");
   const [form, setForm] = useState({ firstName: "", lastName: "", dob: "", email: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+
   async function submit(e) {
     e.preventDefault();
     setError("");
@@ -38,6 +41,7 @@ function AuthScreen({ initialError = "" }) {
       setBusy(false);
     }
   }
+
   return <main className="auth-shell">
     <div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div>
     <section className="auth-card">
@@ -55,13 +59,42 @@ function AuthScreen({ initialError = "" }) {
         {mode === "register" && <>
           <label>First name<input required value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} placeholder="First name" /></label>
           <label>Last name<input required value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} placeholder="Last name" /></label>
-          <label className="full">Date of birth<input required type="date" value={form.dob} onChange={e => setForm({ ...form, dob: e.target.value })} /></label>
+          <label className="full">Date of birth (Click calendar to select)
+            <input required type="date" value={form.dob} onChange={e => setForm({ ...form, dob: e.target.value })} />
+          </label>
         </>}
-        <label className="full">Email address<input required type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="you@example.com" /></label>
-        {mode !== "reset" && <label className="full">Password<input required minLength={8} type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="At least 8 characters" /></label>}
+        <label className="full">Email address
+          <input required type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="you@example.com" />
+        </label>
+        {mode !== "reset" && (
+          <label className="full">Password
+            <div className="password-input-wrap">
+              <input
+                required
+                minLength={8}
+                type={showPassword ? "text" : "password"}
+                autoComplete={mode === "register" ? "new-password" : "current-password"}
+                value={form.password}
+                onChange={e => setForm({ ...form, password: e.target.value })}
+                placeholder="At least 8 characters"
+              />
+              <button
+                type="button"
+                className="password-toggle-btn"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </label>
+        )}
         {error && <p className="error full">{error}</p>}
         {notice && <p className="muted full" role="status">{notice}</p>}
-        <button className="primary full" disabled={busy}>{busy ? "Please wait…" : mode === "register" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}</button>
+        <button className="primary full" disabled={busy}>
+          {busy ? "Please wait…" : mode === "register" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}
+        </button>
       </form>
       {mode === "login" && <button className="text-button" type="button" onClick={() => { setMode("reset"); setError(""); setNotice(""); }}>Forgot password?</button>}
       <p className="auth-legal">By continuing, you agree to use RC Trainer as a fitness tracking tool, not as a substitute for professional medical advice.</p>
@@ -72,6 +105,8 @@ function AuthScreen({ initialError = "" }) {
 function PasswordRecoveryScreen({ onComplete }) {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -100,8 +135,48 @@ function PasswordRecoveryScreen({ onComplete }) {
       <h1>Choose a new password.</h1>
       <p className="muted">Use at least 8 characters for your new password.</p>
       <form className="form-grid" onSubmit={submit}>
-        <label className="full">New password<input required minLength={8} type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} /></label>
-        <label className="full">Confirm new password<input required minLength={8} type="password" autoComplete="new-password" value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>
+        <label className="full">New password
+          <div className="password-input-wrap">
+            <input
+              required
+              minLength={8}
+              type={showPassword ? "text" : "password"}
+              autoComplete="new-password"
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+            />
+            <button
+              type="button"
+              className="password-toggle-btn"
+              onClick={() => setShowPassword(!showPassword)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              tabIndex={-1}
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </label>
+        <label className="full">Confirm new password
+          <div className="password-input-wrap">
+            <input
+              required
+              minLength={8}
+              type={showConfirmation ? "text" : "password"}
+              autoComplete="new-password"
+              value={confirmation}
+              onChange={event => setConfirmation(event.target.value)}
+            />
+            <button
+              type="button"
+              className="password-toggle-btn"
+              onClick={() => setShowConfirmation(!showConfirmation)}
+              aria-label={showConfirmation ? "Hide password" : "Show password"}
+              tabIndex={-1}
+            >
+              {showConfirmation ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </label>
         {error && <p className="error full">{error}</p>}
         <button className="primary full" disabled={busy}>{busy ? "Updating…" : "Update password"}</button>
       </form>
@@ -112,16 +187,187 @@ function PasswordRecoveryScreen({ onComplete }) {
 function Onboarding({ profile, onSave, error }) {
   const [p, setP] = useState(profile);
   const [saving, setSaving] = useState(false);
+  const [autoNotice, setAutoNotice] = useState("");
+  const [attachedName, setAttachedName] = useState("");
+
+  function updateBaseline(key, val) {
+    const updated = { ...p, [key]: val };
+    if (["heightCm", "weightKg", "goal", "activityLevel"].includes(key)) {
+      if (updated.heightCm && updated.weightKg && updated.goal && updated.activityLevel) {
+        const rec = calculateRecommendedTargets({
+          heightCm: updated.heightCm,
+          weightKg: updated.weightKg,
+          goal: updated.goal,
+          activityLevel: updated.activityLevel
+        });
+        if (rec) {
+          updated.stepTarget = rec.stepTarget;
+          updated.proteinTargetG = rec.proteinTargetG;
+          updated.proteinTarget = rec.proteinTargetG;
+          updated.caloriesTarget = rec.caloriesTarget;
+          setAutoNotice("Targets auto-calculated based on your height, weight, activity level and goal!");
+        }
+      }
+    }
+    setP(updated);
+  }
+
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
     try { await onSave(p); } finally { setSaving(false); }
   }
-  return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card onboarding-card"><div className="eyebrow">LET'S SET YOUR BASELINE</div><h1>Set your starting point.</h1><p className="muted">Enter your own baseline and targets. Your AI plans will use these saved values.</p><form className="form-grid" onSubmit={submit}><label>Height (cm)<input type="number" min="100" max="230" required value={p.heightCm} onChange={e => setP({ ...p, heightCm: e.target.value === "" ? "" : Number(e.target.value) })} /></label><label>Current weight (kg)<input type="number" min="30" max="300" step=".1" required value={p.weightKg} onChange={e => setP({ ...p, weightKg: e.target.value === "" ? "" : Number(e.target.value) })} /></label><label>Target weight (kg, optional)<input type="number" min="30" max="300" step=".1" value={p.targetWeightKg ?? ""} onChange={e => setP({ ...p, targetWeightKg: e.target.value === "" ? "" : Number(e.target.value) })} /></label><label className="full">Desired goal<select required value={p.goal} onChange={e => setP({ ...p, goal: e.target.value })}><option value="">Choose a goal</option><option value="WEIGHT_LOSS">Weight loss</option><option value="FAT_LOSS">Fat loss</option><option value="MUSCLE_GAIN">Muscle gain</option><option value="RECOMPOSITION">Body recomposition</option></select></label><label className="full">Activity level<select required value={p.activityLevel} onChange={e => setP({ ...p, activityLevel: e.target.value })}><option value="">Choose activity level</option><option value="SEDENTARY">Sedentary</option><option value="LIGHT">Lightly active</option><option value="MODERATE">Moderately active</option><option value="VERY_ACTIVE">Very active</option></select></label><label className="full">Training days per week<select required value={p.trainingDaysPerWeek} onChange={e => setP({ ...p, trainingDaysPerWeek: e.target.value === "" ? "" : Number(e.target.value) })}><option value="">Choose days per week</option><option value="3">3 days</option><option value="4">4 days</option><option value="5">5 days</option><option value="6">6 days</option></select></label><label>Daily step target<input type="number" min="1000" max="30000" step="500" required value={p.stepTarget} onChange={e => setP({ ...p, stepTarget: e.target.value === "" ? "" : Number(e.target.value) })} /></label><label>Daily protein target (g)<input type="number" min="20" max="400" step="1" required value={p.proteinTargetG ?? p.proteinTarget} onChange={e => setP({ ...p, proteinTargetG: e.target.value === "" ? "" : Number(e.target.value), proteinTarget: e.target.value === "" ? "" : Number(e.target.value) })} /></label><label className="full">Daily calorie target (kcal)<input type="number" min="500" max="10000" step="1" required value={p.caloriesTarget} onChange={e => setP({ ...p, caloriesTarget: e.target.value === "" ? "" : Number(e.target.value) })} /></label>{error && <p className="error full">{error}</p>}<button className="primary full" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section></main>;
+
+  return <main className="auth-shell">
+    <div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div>
+    <section className="auth-card onboarding-card">
+      <div className="eyebrow">LET'S SET YOUR BASELINE</div>
+      <h1>Set your starting point.</h1>
+      <p className="muted">Enter your physical baseline, location, and training frequency. Your daily meals and workout schedule will be automatically tailored to your calendar day.</p>
+      
+      <form className="form-grid" onSubmit={submit}>
+        <label>Height (cm)
+          <input type="number" min="100" max="230" required value={p.heightCm} onChange={e => updateBaseline("heightCm", e.target.value === "" ? "" : Number(e.target.value))} />
+        </label>
+        <label>Current weight (kg)
+          <input type="number" min="30" max="300" step=".1" required value={p.weightKg} onChange={e => updateBaseline("weightKg", e.target.value === "" ? "" : Number(e.target.value))} />
+        </label>
+
+        {/* Country and City */}
+        <label>Country
+          <input placeholder="e.g. India, United States" value={p.country || ""} onChange={e => setP({ ...p, country: e.target.value })} />
+        </label>
+        <label>City
+          <input placeholder="e.g. Hyderabad, Bengaluru, New York" value={p.city || ""} onChange={e => setP({ ...p, city: e.target.value })} />
+        </label>
+
+        <label className="full">Target weight (kg, optional)
+          <input type="number" min="30" max="300" step=".1" value={p.targetWeightKg ?? ""} onChange={e => setP({ ...p, targetWeightKg: e.target.value === "" ? "" : Number(e.target.value) })} />
+        </label>
+
+        <label className="full">Desired goal
+          <select required value={p.goal} onChange={e => updateBaseline("goal", e.target.value)}>
+            <option value="">Choose a goal</option>
+            <option value="WEIGHT_LOSS">Weight loss</option>
+            <option value="FAT_LOSS">Fat loss (Preserve muscle, shed fat)</option>
+            <option value="MUSCLE_GAIN">Muscle gain (Hypertrophy / Lean bulk)</option>
+            <option value="RECOMPOSITION">Body recomposition</option>
+          </select>
+        </label>
+
+        <label className="full">Activity level
+          <select required value={p.activityLevel} onChange={e => updateBaseline("activityLevel", e.target.value)}>
+            <option value="">Choose activity level</option>
+            <option value="SEDENTARY">Sedentary (Desk job, minimal activity)</option>
+            <option value="LIGHT">Lightly active (Daily walking / light activity)</option>
+            <option value="MODERATE">Moderately active (Active lifestyle)</option>
+            <option value="VERY_ACTIVE">Very active (High-output manual/athletic)</option>
+          </select>
+        </label>
+
+        <label>Dietary preference
+          <select value={p.dietaryPreference || "NON_VEG"} onChange={e => setP({ ...p, dietaryPreference: e.target.value })}>
+            <option value="NON_VEG">Non-Vegetarian (Chicken, Fish, Prawns, Mutton, Eggs)</option>
+            <option value="VEG">Vegetarian (Paneer, Tofu, Soya Chunks, Dal, Curd/Yogurt)</option>
+            <option value="EGGETARIAN">Eggetarian (Veg + Eggs)</option>
+            <option value="VEGAN">Vegan (Plant-based, Tofu, Soya)</option>
+          </select>
+        </label>
+
+        <label>Workout timing preference
+          <select value={p.workoutTiming || "EVENING"} onChange={e => setP({ ...p, workoutTiming: e.target.value })}>
+            <option value="MORNING">Morning Workout (Pre-workout at ~6:30 AM)</option>
+            <option value="EVENING">Evening Workout (Pre-workout at ~5:00 PM)</option>
+          </select>
+        </label>
+
+        <label className="full">Default equipment situation
+          <select value={p.equipmentAccess || "FULL_GYM"} onChange={e => setP({ ...p, equipmentAccess: e.target.value })}>
+            <option value="FULL_GYM">Gym (Barbells, Dumbbells, Cables, Machines)</option>
+            <option value="BODYWEIGHT">No Equipment (Bodyweight & Calisthenics)</option>
+          </select>
+        </label>
+
+        <label className="full">How many days per week will you work out?
+          <select required value={p.trainingDaysPerWeek} onChange={e => setP({ ...p, trainingDaysPerWeek: e.target.value === "" ? "" : Number(e.target.value) })}>
+            <option value="">Choose workout days</option>
+            <option value="3">3 days (Full Body Split)</option>
+            <option value="4">4 days (Upper / Lower Split)</option>
+            <option value="5">5 days (Push / Pull / Legs / Upper / Lower)</option>
+            <option value="6">6 days (Push / Pull / Legs x 2)</option>
+          </select>
+        </label>
+
+        {autoNotice && (
+          <div className="full auto-calc-badge">
+            {autoNotice}
+          </div>
+        )}
+
+        <label>Daily step target
+          <input type="number" min="1000" max="30000" step="500" required value={p.stepTarget} onChange={e => setP({ ...p, stepTarget: e.target.value === "" ? "" : Number(e.target.value) })} />
+        </label>
+
+        <label>Daily protein target (g)
+          <input type="number" min="20" max="400" step="1" required value={p.proteinTargetG ?? p.proteinTarget} onChange={e => setP({ ...p, proteinTargetG: e.target.value === "" ? "" : Number(e.target.value), proteinTarget: e.target.value === "" ? "" : Number(e.target.value) })} />
+        </label>
+
+        <label className="full">Daily calorie target (kcal)
+          <input type="number" min="500" max="10000" step="1" required value={p.caloriesTarget} onChange={e => setP({ ...p, caloriesTarget: e.target.value === "" ? "" : Number(e.target.value) })} />
+        </label>
+
+        <label className="full">Any injury, pain or medical conditions
+          <input
+            placeholder="e.g. Knee discomfort, lower back stiffness, shoulder pain, or none"
+            value={p.injuriesOrConditions || ""}
+            onChange={e => setP({ ...p, injuriesOrConditions: e.target.value })}
+          />
+        </label>
+
+        <label className="full">Doctor's prescription or medical notes (Optional)
+          <input
+            placeholder="Optional doctor's guidance or notes"
+            value={p.prescriptionNotes || ""}
+            onChange={e => setP({ ...p, prescriptionNotes: e.target.value })}
+          />
+        </label>
+
+        <div className="full">
+          <label style={{ marginBottom: "6px" }}>Optional prescription attachment (Image / PDF)</label>
+          <label className="file-attachment-box">
+            <Paperclip size={18} className="muted" />
+            <span style={{ fontSize: "11px" }}>{attachedName || p.prescriptionUrl || "Attach prescription or medical report"}</span>
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              style={{ display: "none" }}
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) {
+                  setAttachedName(f.name);
+                  setP(curr => ({ ...curr, prescriptionUrl: f.name }));
+                }
+              }}
+            />
+          </label>
+        </div>
+
+        {error && <p className="error full">{error}</p>}
+        <button className="primary full" disabled={saving}>
+          {saving ? "Saving…" : "Save profile & generate plans"}
+        </button>
+      </form>
+    </section>
+  </main>;
 }
 
-const nav = [{ id: "overview", label: "Overview", icon: Home }, { id: "nutrition", label: "Meals", icon: Apple }, { id: "training", label: "Workouts", icon: Dumbbell }, { id: "progress", label: "Progress", icon: BarChart3 }, { id: "profile", label: "Profile", icon: Activity }];
-const todayLabel = new Date().toLocaleDateString([], { weekday: "long" }).toUpperCase();
+const nav = [
+  { id: "overview", label: "Overview", icon: Home },
+  { id: "nutrition", label: "Meals", icon: Apple },
+  { id: "training", label: "Workouts", icon: Dumbbell },
+  { id: "progress", label: "Progress", icon: BarChart3 },
+  { id: "profile", label: "Profile", icon: Activity }
+];
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -134,6 +380,21 @@ export default function App() {
   const [profileSaveError, setProfileSaveError] = useState("");
   const [profile, setProfile] = useState(emptyProfile);
   const [tab, setTab] = useState("overview");
+
+  // Date selection & history navigation
+  const todayStr = localDateString();
+  const yesterdayStr = localDateString(new Date(Date.now() - 86400000));
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [dateMenuOpen, setDateMenuOpen] = useState(false);
+
+  const isViewingToday = selectedDate === todayStr;
+  const isViewingYesterday = selectedDate === yesterdayStr;
+  const selectedDateLabel = isViewingToday
+    ? "Today"
+    : isViewingYesterday
+      ? "Yesterday"
+      : new Date(`${selectedDate}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+
   const [meals, setMeals] = useState([]);
   const [mealHistory, setMealHistory] = useState([]);
   const [mealText, setMealText] = useState("");
@@ -159,7 +420,26 @@ export default function App() {
   const [exerciseLogs, setExerciseLogs] = useState({});
   const [toast, setToast] = useState("");
   const [showProfile, setShowProfile] = useState(false);
-  const totals = useMemo(() => meals.reduce((a, m) => ({ calories: a.calories + m.calories, protein: a.protein + m.protein, carbs: a.carbs + m.carbs, fats: a.fats + m.fats }), { calories: 0, protein: 0, carbs: 0, fats: 0 }), [meals]);
+
+  // Filter meals & totals based on selected timeline date
+  const displayedMeals = useMemo(() => {
+    return mealHistory.filter(meal => meal.loggedOn === selectedDate);
+  }, [mealHistory, selectedDate]);
+
+  const displayedTotals = useMemo(() => {
+    return displayedMeals.reduce((a, m) => ({
+      calories: a.calories + m.calories,
+      protein: a.protein + m.protein,
+      carbs: a.carbs + m.carbs,
+      fats: a.fats + m.fats
+    }), { calories: 0, protein: 0, carbs: 0, fats: 0 });
+  }, [displayedMeals]);
+
+  const displayedSteps = useMemo(() => {
+    const entry = stepHistory.find(s => s.loggedOn === selectedDate);
+    return entry ? entry.steps : isViewingToday ? steps : null;
+  }, [stepHistory, selectedDate, steps, isViewingToday]);
+
   const proteinTarget = Number(profile.proteinTargetG ?? profile.proteinTarget) || null;
   const caloriesTarget = Number(profile.caloriesTarget) || null;
   const plan = generatedPlan?.days?.length === days ? generatedPlan : null;
@@ -272,6 +552,7 @@ export default function App() {
     setStartWeight(null);
     setRecentSets([]);
     setRecentSetsError("");
+
     api.getProfile().then(async saved => {
       const nextProfile = { ...emptyProfile, ...saved, proteinTarget: saved.proteinTargetG ?? saved.proteinTarget };
       setProfile(nextProfile);
@@ -286,14 +567,19 @@ export default function App() {
         catch (err) { setMealPlanError(err instanceof Error ? err.message : "Could not load your meal plan."); }
         finally { setMealPlanBusy(false); }
       }
-    }).catch(err => { setProfileError(err instanceof Error ? err.message : "Could not load your saved profile."); }).finally(() => setProfileLoading(false));
+    }).catch(err => {
+      setProfileError(err instanceof Error ? err.message : "Could not load your saved profile.");
+    }).finally(() => setProfileLoading(false));
   }, [authenticated, authReady, passwordRecovery]);
+
   async function saveProfile(next) {
     setProfileSaveError("");
     try {
       const saved = await api.saveProfile(next);
       const updated = { ...next, ...saved, proteinTarget: saved.proteinTargetG ?? saved.proteinTarget };
-      setProfile(updated); setDays(updated.trainingDaysPerWeek); setOnboarded(true);
+      setProfile(updated);
+      setDays(updated.trainingDaysPerWeek);
+      setOnboarded(true);
       setGeneratedPlan(null);
       setMealPlan(null);
       setMealPlanError("");
@@ -307,7 +593,9 @@ export default function App() {
       if (mealResult.status === "fulfilled") setMealPlan(mealResult.value);
       else setMealPlanError(mealResult.reason instanceof Error ? mealResult.reason.message : "Could not generate a meal plan.");
       setMealPlanBusy(false);
-      if (workoutResult.status === "fulfilled" && mealResult.status === "fulfilled") setToast("Profile saved and personalized plans are ready.");
+      if (workoutResult.status === "fulfilled" && mealResult.status === "fulfilled") {
+        setToast("Profile saved. Your daily meals and training plan are ready.");
+      }
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Profile could not be saved.";
@@ -316,29 +604,74 @@ export default function App() {
       return false;
     }
   }
-  async function changeTrainingDays(nextDays) { const updated = { ...profile, trainingDaysPerWeek: nextDays }; setActiveDay(0); await saveProfile(updated); }
-  async function generateMealPlan() {
-    setMealPlanBusy(true); setMealPlanError("");
-    try { setMealPlan(await api.getOrGenerateMealPlan(profile, { force: Boolean(mealPlan) })); }
-    catch (err) { setMealPlanError(err instanceof Error ? err.message : "Could not generate a meal plan."); }
-    finally { setMealPlanBusy(false); }
+
+  async function changeTrainingDays(nextDays) {
+    const updated = { ...profile, trainingDaysPerWeek: nextDays };
+    setActiveDay(0);
+    await saveProfile(updated);
   }
+
+  async function generateMealPlan() {
+    setMealPlanBusy(true);
+    setMealPlanError("");
+    try {
+      setMealPlan(await api.getOrGenerateMealPlan(profile, { force: true }));
+      setToast("Daily nutrition plan updated.");
+    } catch (err) {
+      setMealPlanError(err instanceof Error ? err.message : "Could not generate a meal plan.");
+    } finally {
+      setMealPlanBusy(false);
+    }
+  }
+
   async function regenerateWorkoutPlan() {
     setWorkoutPlanBusy(true);
-    try { setGeneratedPlan(await api.getOrGenerateWorkoutPlan(profile, { force: true })); setToast("Your personalized workout plan is ready."); }
-    catch (err) { setToast(err instanceof Error ? err.message : "Could not generate a workout plan."); }
-    finally { setWorkoutPlanBusy(false); }
+    try {
+      setGeneratedPlan(await api.getOrGenerateWorkoutPlan(profile, { force: true }));
+      setToast("Training plan schedule refreshed.");
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Could not generate a workout plan.");
+    } finally {
+      setWorkoutPlanBusy(false);
+    }
   }
+
   async function logPlannedMeal(meal) {
-    try { const saved = await api.logMeal({ ...meal, mealType: meal.mealType || "Meal" }); setMeals(prev => [saved, ...prev]); setMealHistory(prev => [saved, ...prev]); setToast("Suggested meal added to today’s log."); }
-    catch (err) { setToast(err instanceof Error ? `Meal was not saved: ${err.message}` : "Meal could not be saved."); }
+    try {
+      const saved = await api.logMeal({ ...meal, mealType: meal.mealType || "Meal" });
+      setMeals(prev => [saved, ...prev]);
+      setMealHistory(prev => [saved, ...prev]);
+      setToast("Suggested meal added to your log.");
+    } catch (err) {
+      setToast(err instanceof Error ? `Meal was not saved: ${err.message}` : "Meal could not be saved.");
+    }
   }
-  async function addMeal() { if (!mealText.trim()) return; setMealBusy(true); setMealError(""); try { const estimate = await api.estimateMeal(mealText); const meal = await api.logMeal({ ...estimate, mealType: "Meal" }); setMeals(prev => [...prev, meal]); setMealHistory(prev => [meal, ...prev]); setMealText(""); setToast("Meal added to today's log"); } catch (e) { setMealError(e instanceof Error ? e.message : "Could not estimate this meal. Check the API connection."); } finally { setMealBusy(false); } }
-  async function addWeight() {
-    const value = Number(weightInput);
+
+  async function addMeal() {
+    if (!mealText.trim()) return;
+    setMealBusy(true);
+    setMealError("");
+    try {
+      const estimate = await api.estimateMeal(mealText);
+      const meal = await api.logMeal({ ...estimate, mealType: "Meal" });
+      setMeals(prev => [...prev, meal]);
+      setMealHistory(prev => [meal, ...prev]);
+      setMealText("");
+      setToast("Meal estimated and added to log.");
+    } catch (e) {
+      setMealError(e instanceof Error ? e.message : "Could not estimate this meal. Check the API connection.");
+    } finally {
+      setMealBusy(false);
+    }
+  }
+
+  async function addWeight(customWeight, customDate) {
+    const val = customWeight !== undefined ? customWeight : weightInput;
+    const value = Number(val);
     if (!isWeightKg(value)) { setToast("Enter a weight between 30 and 300 kg."); return; }
     try {
-      const saved = await api.logWeight(value);
+      const targetDate = customDate || todayStr;
+      const saved = await api.logWeight(value, targetDate);
       const savedWeight = Number(saved.weight_kg);
       const loggedOn = saved.logged_on;
       const entry = {
@@ -351,31 +684,38 @@ export default function App() {
       setHistory(current => [...current.filter(item => item.loggedOn !== loggedOn), entry].sort((a, b) => a.loggedOn.localeCompare(b.loggedOn)).slice(-30));
       setActivityError("");
       setStartWeight(current => current == null ? savedWeight : current);
-      setToast("Weight entry saved");
+      setToast(`Weight entry saved for ${new Date(targetDate + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" })}`);
     } catch (err) {
       setToast(err instanceof Error ? `Weight was not saved: ${err.message}` : "Weight could not be saved.");
     }
   }
-  async function saveSteps() {
-    if (stepsInput === "") { setToast("Choose a step count before saving."); return; }
-    const value = Number(stepsInput);
+
+  async function saveSteps(customSteps, customDate) {
+    const val = customSteps !== undefined ? customSteps : stepsInput;
+    if (val === "") { setToast("Choose a step count before saving."); return; }
+    const value = Number(val);
     if (!isStepCount(value)) { setToast("Enter a whole step count between 0 and 100,000."); return; }
     try {
-      const saved = await api.logSteps(value);
-      setSteps(Number(saved.steps));
-      setStepsInput(String(saved.steps));
+      const targetDate = customDate || todayStr;
+      const saved = await api.logSteps(value, targetDate);
       const loggedOn = saved.log_date;
+      if (loggedOn === todayStr) {
+        setSteps(Number(saved.steps));
+        setStepsInput(String(saved.steps));
+      }
       setStepHistory(current => [...current.filter(item => item.loggedOn !== loggedOn), {
         loggedOn,
         day: new Date(`${loggedOn}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" }),
         steps: Number(saved.steps)
       }].sort((a, b) => a.loggedOn.localeCompare(b.loggedOn)));
       setActivityError("");
-      setToast("Today’s steps saved.");
+      const dayWord = loggedOn === todayStr ? "Today" : loggedOn === yesterdayStr ? "Yesterday" : new Date(loggedOn + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" });
+      setToast(`${dayWord}’s steps saved.`);
     } catch (err) {
       setToast(err instanceof Error ? `Steps were not saved: ${err.message}` : "Steps could not be saved.");
     }
   }
+
   async function signOut() {
     try {
       await api.signOut();
@@ -384,6 +724,7 @@ export default function App() {
       setToast(error instanceof Error ? `Could not sign out: ${error.message}` : "Could not sign out.");
     }
   }
+
   async function exportData() {
     try {
       const data = await api.exportMyData();
@@ -400,6 +741,7 @@ export default function App() {
       throw error;
     }
   }
+
   async function deleteAccount() {
     try {
       await api.deleteAccount();
@@ -409,37 +751,248 @@ export default function App() {
       throw error;
     }
   }
-  if (!authReady) return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">RC TRAINER</div><h1>Restoring your session.</h1><p className="muted">Checking your secure Supabase session.</p></section></main>;
-  if (passwordRecovery) return <PasswordRecoveryScreen onComplete={() => { setPasswordRecovery(false); setToast("Password updated."); }} />;
+
+  if (!authReady) {
+    return <main className="auth-shell">
+      <div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div>
+      <section className="auth-card">
+        <div className="eyebrow">RC TRAINER</div>
+        <h1>Restoring your session.</h1>
+        <p className="muted">Checking your secure Supabase session.</p>
+      </section>
+    </main>;
+  }
+
+  if (passwordRecovery) {
+    return <PasswordRecoveryScreen onComplete={() => { setPasswordRecovery(false); setToast("Password updated."); }} />;
+  }
+
   if (!authenticated) return <AuthScreen initialError={authError} />;
-  if (profileLoading) return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">RC TRAINER</div><h1>Loading your profile.</h1><p className="muted">Preparing your dashboard and recommendations.</p></section></main>;
-  if (profileError) return <main className="auth-shell"><div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div><section className="auth-card"><div className="eyebrow">PROFILE UNAVAILABLE</div><h1>We couldn't load your profile.</h1><p className="error">{profileError}</p><button className="primary full" onClick={() => window.location.reload()}>Try again</button><button className="secondary full" onClick={signOut}>Sign in again</button></section></main>;
+
+  if (profileLoading) {
+    return <main className="auth-shell">
+      <div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div>
+      <section className="auth-card">
+        <div className="eyebrow">RC TRAINER</div>
+        <h1>Loading your profile.</h1>
+        <p className="muted">Preparing your dashboard and recommendations.</p>
+      </section>
+    </main>;
+  }
+
+  if (profileError) {
+    return <main className="auth-shell">
+      <div className="auth-brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div>
+      <section className="auth-card">
+        <div className="eyebrow">PROFILE UNAVAILABLE</div>
+        <h1>We couldn't load your profile.</h1>
+        <p className="error">{profileError}</p>
+        <button className="primary full" onClick={() => window.location.reload()}>Try again</button>
+        <button className="secondary full" onClick={signOut}>Sign in again</button>
+      </section>
+    </main>;
+  }
+
   if (!onboarded) return <Onboarding profile={profile} onSave={saveProfile} error={profileSaveError} />;
-  const pageTitle = { overview: "Your overview", nutrition: "Nutrition", training: "Training plan", progress: "Your progress", profile: "Profile" }[tab];
-  const page = { overview: <DashboardPage profile={profile} steps={steps} weight={weight} totals={totals} proteinTarget={proteinTarget} caloriesTarget={caloriesTarget} history={history} startWeight={startWeight} plan={plan} activeDay={activeDay} onNavigate={setTab} activityError={activityError} onRetryActivity={reloadUserHistory} />, nutrition: <MealsPage meals={meals} activityError={activityError} onRetryActivity={reloadUserHistory} totals={totals} proteinTarget={proteinTarget} caloriesTarget={caloriesTarget} mealText={mealText} setMealText={setMealText} mealBusy={mealBusy} mealError={mealError} addMeal={addMeal} mealPlan={mealPlan} mealPlanBusy={mealPlanBusy} generateMealPlan={generateMealPlan} mealPlanError={mealPlanError} logPlannedMeal={logPlannedMeal} />, training: <TrainingPage days={days} setDays={setDays} onDaysChange={changeTrainingDays} plan={plan} activeDay={activeDay} workoutPlanBusy={workoutPlanBusy} regenerateWorkoutPlan={regenerateWorkoutPlan} setActiveDay={setActiveDay} exerciseLogs={exerciseLogs} setExerciseLogs={setExerciseLogs} recentSets={recentSets} recentSetsError={recentSetsError} onRetryHistory={reloadUserHistory} setRecentSets={setRecentSets} setToast={setToast} />, progress: <ProgressPage weight={weight} weightInput={weightInput} setWeightInput={setWeightInput} addWeight={addWeight} steps={steps} stepsInput={stepsInput} setStepsInput={setStepsInput} saveSteps={saveSteps} history={history} mealHistory={mealHistory} stepHistory={stepHistory} activityError={activityError} onRetryActivity={reloadUserHistory} setToast={setToast} />, profile: <ProfilePage profile={profile} onSave={saveProfile} onExportData={exportData} onDeleteAccount={deleteAccount} /> }[tab];
+
+  const pageTitle = {
+    overview: "Your overview",
+    nutrition: "Nutrition",
+    training: "Training plan",
+    progress: "Your progress",
+    profile: "Profile"
+  }[tab];
+
+  const page = {
+    overview: (
+      <DashboardPage
+        profile={profile}
+        steps={displayedSteps}
+        weight={weight}
+        totals={displayedTotals}
+        proteinTarget={proteinTarget}
+        caloriesTarget={caloriesTarget}
+        history={history}
+        startWeight={startWeight}
+        plan={plan}
+        activeDay={activeDay}
+        onNavigate={setTab}
+        activityError={activityError}
+        onRetryActivity={reloadUserHistory}
+        isReadOnly={!isViewingToday}
+        selectedDateLabel={selectedDateLabel}
+        onSwitchToToday={() => setSelectedDate(todayStr)}
+      />
+    ),
+    nutrition: (
+      <MealsPage
+        meals={displayedMeals}
+        activityError={activityError}
+        onRetryActivity={reloadUserHistory}
+        totals={displayedTotals}
+        proteinTarget={proteinTarget}
+        caloriesTarget={caloriesTarget}
+        mealText={mealText}
+        setMealText={setMealText}
+        mealBusy={mealBusy}
+        mealError={mealError}
+        addMeal={addMeal}
+        mealPlan={mealPlan}
+        mealPlanBusy={mealPlanBusy}
+        generateMealPlan={generateMealPlan}
+        mealPlanError={mealPlanError}
+        logPlannedMeal={logPlannedMeal}
+        isReadOnly={!isViewingToday}
+        selectedDateLabel={selectedDateLabel}
+        onSwitchToToday={() => setSelectedDate(todayStr)}
+      />
+    ),
+    training: (
+      <TrainingPage
+        days={days}
+        setDays={setDays}
+        onDaysChange={changeTrainingDays}
+        plan={plan}
+        activeDay={activeDay}
+        workoutPlanBusy={workoutPlanBusy}
+        regenerateWorkoutPlan={regenerateWorkoutPlan}
+        setActiveDay={setActiveDay}
+        exerciseLogs={exerciseLogs}
+        setExerciseLogs={setExerciseLogs}
+        recentSets={recentSets}
+        recentSetsError={recentSetsError}
+        onRetryHistory={reloadUserHistory}
+        setRecentSets={setRecentSets}
+        setToast={setToast}
+        isReadOnly={!isViewingToday}
+        selectedDateLabel={selectedDateLabel}
+      />
+    ),
+    progress: (
+      <ProgressPage
+        weight={weight}
+        weightInput={weightInput}
+        setWeightInput={setWeightInput}
+        addWeight={addWeight}
+        steps={displayedSteps}
+        stepsInput={stepsInput}
+        setStepsInput={setStepsInput}
+        saveSteps={saveSteps}
+        history={history}
+        mealHistory={mealHistory}
+        stepHistory={stepHistory}
+        activityError={activityError}
+        onRetryActivity={reloadUserHistory}
+        setToast={setToast}
+      />
+    ),
+    profile: (
+      <ProfilePage
+        profile={profile}
+        onSave={saveProfile}
+        onExportData={exportData}
+        onDeleteAccount={deleteAccount}
+      />
+    )
+  }[tab];
+
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">RC</span><span>RC TRAINER</span></div>
       <div className="side-label">WORKSPACE</div>
-      <nav>{nav.map(n => <button key={n.id} className={tab === n.id ? "nav-item selected" : "nav-item"} onClick={() => setTab(n.id)}><n.icon size={18} />{n.label}</button>)}</nav>
+      <nav>
+        {nav.map(n => (
+          <button key={n.id} className={tab === n.id ? "nav-item selected" : "nav-item"} onClick={() => setTab(n.id)}>
+            <n.icon size={18} />{n.label}
+          </button>
+        ))}
+      </nav>
       <div className="sidebar-bottom">
         <div className="profile-mini">
-          <div className="avatar">{profile.firstName[0]}</div>
-          <div><strong>{profile.firstName} {profile.lastName}</strong><small>{profile.goal.replace("_", " ").toLowerCase()}</small></div>
+          <div className="avatar">{profile.firstName?.[0] || "U"}</div>
+          <div>
+            <strong>{profile.firstName} {profile.lastName}</strong>
+            <small>{(profile.goal || "TRAINING").replace("_", " ").toLowerCase()}</small>
+          </div>
           <button className="icon-button" onClick={() => setShowProfile(!showProfile)}><ChevronDown size={16} /></button>
         </div>
         {showProfile && <button className="nav-item" onClick={signOut}><LogOut size={17} /> Sign out</button>}
       </div>
     </aside>
+
     <main className="main-area">
       <header className="topbar">
-        <div><span className="muted">{todayLabel}, YOUR NEXT REP STARTS HERE</span><h1>{pageTitle}</h1></div>
-        <button className="date-pill"><Activity size={15} /> Today <ChevronDown size={14} /></button>
+        <div>
+          <span className="muted">{new Date().toLocaleDateString([], { weekday: "long" }).toUpperCase()}, YOUR NEXT REP STARTS HERE</span>
+          <h1>{pageTitle}</h1>
+        </div>
+
+        {/* Interactive Date Selector with History Timeline */}
+        <div className="date-selector-wrap">
+          <button
+            className={`date-pill ${!isViewingToday ? "history-active" : ""}`}
+            onClick={() => setDateMenuOpen(!dateMenuOpen)}
+            title="Click to toggle between Today and Past Date Logs"
+          >
+            <Clock size={15} /> {selectedDateLabel} {!isViewingToday && <span className="history-badge">History (Read-Only)</span>} <ChevronDown size={14} />
+          </button>
+
+          {dateMenuOpen && (
+            <div className="date-dropdown">
+              <div className="date-dropdown-header">TIMELINE / HISTORY</div>
+              <button
+                className={`date-dropdown-item ${isViewingToday ? "active" : ""}`}
+                onClick={() => { setSelectedDate(todayStr); setDateMenuOpen(false); }}
+              >
+                <span>Today ({new Date().toLocaleDateString([], { month: "short", day: "numeric" })})</span>
+                {isViewingToday && <span style={{ fontSize: "10px", color: "var(--lime)" }}>● Active</span>}
+              </button>
+              <button
+                className={`date-dropdown-item ${isViewingYesterday ? "active" : ""}`}
+                onClick={() => { setSelectedDate(yesterdayStr); setDateMenuOpen(false); }}
+              >
+                <span>Yesterday ({new Date(yesterdayStr + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" })})</span>
+                <span className="history-tag">History</span>
+              </button>
+              {[2, 3, 4, 5, 6].map(d => {
+                const pastDateStr = localDateString(new Date(Date.now() - d * 86400000));
+                const pastLabel = new Date(`${pastDateStr}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+                return (
+                  <button
+                    key={pastDateStr}
+                    className={`date-dropdown-item ${selectedDate === pastDateStr ? "active" : ""}`}
+                    onClick={() => { setSelectedDate(pastDateStr); setDateMenuOpen(false); }}
+                  >
+                    <span>{pastLabel}</span>
+                    <span style={{ fontSize: "9px", color: "var(--muted)" }}>Read-only</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </header>
-      <Suspense fallback={<section className="content"><p className="muted">Loading…</p></section>}>{page}</Suspense>
-      <footer className="footer"><span>RC TRAINER</span><span>Progress over perfection.</span><span data-testid="build-commit">Build {__APP_COMMIT__.slice(0, 7)}</span></footer>
+
+      <Suspense fallback={<section className="content"><p className="muted">Loading…</p></section>}>
+        {page}
+      </Suspense>
+
+      <footer className="footer">
+        <span>RC TRAINER</span>
+        <span>Progress over perfection.</span>
+        <span data-testid="build-commit">Build {__APP_COMMIT__.slice(0, 7)}</span>
+      </footer>
     </main>
-    <nav className="mobile-nav">{nav.map(n => <button key={n.id} className={tab === n.id ? "mobile-item active" : "mobile-item"} onClick={() => setTab(n.id)}><n.icon size={19} /><span>{n.label}</span></button>)}</nav>
+
+    <nav className="mobile-nav">
+      {nav.map(n => (
+        <button key={n.id} className={tab === n.id ? "mobile-item active" : "mobile-item"} onClick={() => setTab(n.id)}>
+          <n.icon size={19} />
+          <span>{n.label}</span>
+        </button>
+      ))}
+    </nav>
+
     {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
   </div>;
 }

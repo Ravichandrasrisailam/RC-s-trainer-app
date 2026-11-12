@@ -12,5 +12,13 @@ export const emptyProfile = {
   proteinTarget: "",
   proteinTargetG: "",
   caloriesTarget: "",
+  country: "",
+  city: "",
+  dietaryPreference: "NON_VEG",
+  workoutTiming: "EVENING",
+  equipmentAccess: "FULL_GYM",
+  injuriesOrConditions: "",
+  prescriptionNotes: "",
+  prescriptionUrl: "",
   hasOnboarded: false
 };

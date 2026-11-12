@@ -43,7 +43,7 @@ export function isFitnessProfile(profile) {
 
 export function isMealPlan(plan) {
   return typeof plan?.label === "string" && plan.label.trim().length > 0
-    && Array.isArray(plan.meals) && plan.meals.length >= 3 && plan.meals.length <= 5
+    && Array.isArray(plan.meals) && plan.meals.length >= 3 && plan.meals.length <= 6
     && plan.meals.every(meal => meal && typeof meal.name === "string" && meal.name.trim().length > 0
       && typeof meal.mealType === "string" && meal.mealType.trim().length > 0
       && typeof meal.portion === "string" && meal.portion.trim().length > 0

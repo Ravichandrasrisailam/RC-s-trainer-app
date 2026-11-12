@@ -3,10 +3,28 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { MetricCard, PageIntro, ProgressBar } from "../components/ui";
 import { calculateWeightProgress, formatSteps } from "../lib/activity";
 
-export default function DashboardPage({ profile, steps, weight, totals, proteinTarget, caloriesTarget, history, startWeight, plan, activeDay, onNavigate, activityError, onRetryActivity }) {
-  const workoutDay = plan?.days?.[activeDay % (plan.days.length || 1)];
-  const workoutDayName = typeof workoutDay === "string" ? workoutDay : workoutDay?.name;
-  const goalLabel = profile.goal.replaceAll("_", " ").toLowerCase();
+export default function DashboardPage({
+  profile,
+  steps,
+  weight,
+  totals,
+  proteinTarget,
+  caloriesTarget,
+  history,
+  startWeight,
+  plan,
+  activeDay,
+  onNavigate,
+  activityError,
+  onRetryActivity,
+  isReadOnly = false,
+  selectedDateLabel = "Today",
+  onSwitchToToday
+}) {
+  const currentDayOfWeek = new Date().getDay();
+  const dayRoutine = plan?.days?.find(d => d.dayIndex === currentDayOfWeek) || plan?.days?.[0];
+  const workoutDayName = dayRoutine ? dayRoutine.name : "Workout Session";
+  const goalLabel = (profile.goal || "").replaceAll("_", " ").toLowerCase();
   const weightProgress = calculateWeightProgress(history, profile.targetWeightKg, startWeight);
   const weightProgressNote = activityError
     ? "Weight progress is unavailable until your saved history loads."
@@ -19,18 +37,154 @@ export default function DashboardPage({ profile, steps, weight, totals, proteinT
       : `Since your first log: ${Math.abs(weightProgress.changeKg).toFixed(1)} kg ${weightProgress.changeKg > 0 ? "down" : weightProgress.changeKg < 0 ? "up" : "no change"}.`;
 
   return <div className="content">
-    {activityError && <p className="error history-error" role="alert">Your activity history could not be loaded: {activityError} <button className="text-button" onClick={() => onRetryActivity(profile)}>Try again</button></p>}
-    <PageIntro eyebrow="CONSISTENCY BUILDS RESULTS" title={`Good to see you, ${profile.firstName}.`} description="Small actions today. Meaningful progress over time."><div className="goal-chip"><Target size={15} />{goalLabel}</div></PageIntro>
+    {isReadOnly && (
+      <div className="read-only-banner">
+        <div>
+          <strong>Viewing History for {selectedDateLabel}</strong>
+          <span className="history-tag" style={{ marginLeft: "8px" }}>Read-Only History</span>
+          <p className="muted" style={{ margin: "4px 0 0" }}>Displaying activity records for {selectedDateLabel}. You cannot edit past dates.</p>
+        </div>
+        {onSwitchToToday && (
+          <button className="primary" onClick={onSwitchToToday}>Return to Today</button>
+        )}
+      </div>
+    )}
+
+    {activityError && (
+      <p className="error history-error" role="alert">
+        Your activity history could not be loaded: {activityError}{" "}
+        <button className="text-button" onClick={() => onRetryActivity(profile)}>Try again</button>
+      </p>
+    )}
+
+    <PageIntro
+      eyebrow="CONSISTENCY BUILDS RESULTS"
+      title={`Good to see you, ${profile.firstName}.`}
+      description="Small actions today. Meaningful progress over time."
+    >
+      <div className="goal-chip"><Target size={15} />{goalLabel}</div>
+    </PageIntro>
+
     <div className="metric-grid">
-      <MetricCard icon={Footprints} label="Steps today" value={steps == null ? "—" : formatSteps(steps)} target={steps == null ? null : profile.stepTarget} unit="steps" color="lime" note={steps == null ? formatSteps(steps) : profile.stepTarget ? `${Math.max(0, profile.stepTarget - steps).toLocaleString()} to go` : "Set a step target in your profile"} />
-      <MetricCard icon={Flame} label="Protein today" value={totals.protein} target={proteinTarget} unit="g" color="mint" note={proteinTarget ? `${Math.max(0, proteinTarget - totals.protein)}g remaining` : "Set a protein target in your profile"} />
-      <MetricCard icon={Weight} label="Body weight" value={weight == null ? "—" : weight.toFixed(1)} unit="kg" color="blue" note={history.length ? "Latest logged entry" : "Profile baseline"} />
+      <MetricCard
+        icon={Footprints}
+        label={`Steps (${selectedDateLabel})`}
+        value={steps == null ? "—" : formatSteps(steps)}
+        target={steps == null ? null : profile.stepTarget}
+        unit="steps"
+        color="lime"
+        note={steps == null ? formatSteps(steps) : profile.stepTarget ? `${Math.max(0, profile.stepTarget - steps).toLocaleString()} to go` : "Set a step target in your profile"}
+      />
+      <MetricCard
+        icon={Flame}
+        label={`Protein (${selectedDateLabel})`}
+        value={totals.protein}
+        target={proteinTarget}
+        unit="g"
+        color="mint"
+        note={proteinTarget ? `${Math.max(0, proteinTarget - totals.protein)}g remaining` : "Set a protein target in your profile"}
+      />
+      <MetricCard
+        icon={Weight}
+        label="Body weight"
+        value={weight == null ? "—" : weight.toFixed(1)}
+        unit="kg"
+        color="blue"
+        note={history.length ? "Latest logged entry" : "Profile baseline"}
+      />
     </div>
-    <div className="section-heading"><div><h3>Your week at a glance</h3><p className="muted">A simple view of the habits that move you forward.</p></div><button className="text-button" onClick={() => onNavigate("progress")}>View progress <ArrowUpRight size={15} /></button></div>
-    <section className="chart-card"><div className="chart-head"><div><span className="muted">BODY WEIGHT</span><div className="chart-number">{weight == null ? "—" : weight.toFixed(1)} <small>kg</small></div></div><span className="trend"><TrendingUp size={15} /> Weight history</span></div><p className="muted">{weightProgressNote}</p><div className="chart-wrap">{activityError ? <p className="muted">Weight history is unavailable until the saved activity can be loaded.</p> : history.length === 0 ? <p className="muted">No weight entries yet. Log a weigh-in to start your history.</p> : <ResponsiveContainer width="100%" height="100%"><AreaChart data={history}><defs><linearGradient id="weightFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b8e36a" stopOpacity={0.24} /><stop offset="100%" stopColor="#b8e36a" stopOpacity={0} /></linearGradient></defs><CartesianGrid stroke="#252b26" vertical={false} /><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#879087", fontSize: 11 }} /><YAxis domain={["dataMin - 0.4", "dataMax + 0.4"]} axisLine={false} tickLine={false} tick={{ fill: "#879087", fontSize: 11 }} width={35} /><Tooltip contentStyle={{ background: "#171c18", border: "1px solid #303a30", borderRadius: 12, color: "#f5f7f2" }} /><Area type="monotone" dataKey="weight" stroke="#b8e36a" strokeWidth={2.5} fill="url(#weightFill)" /></AreaChart></ResponsiveContainer>}</div></section>
+
+    <div className="section-heading">
+      <div>
+        <h3>Your week at a glance</h3>
+        <p className="muted">A simple view of the habits that move you forward.</p>
+      </div>
+      <button className="text-button" onClick={() => onNavigate("progress")}>
+        View progress <ArrowUpRight size={15} />
+      </button>
+    </div>
+
+    <section className="chart-card">
+      <div className="chart-head">
+        <div>
+          <span className="muted">BODY WEIGHT TREND</span>
+          <div className="chart-number">{weight == null ? "—" : weight.toFixed(1)} <small>kg</small></div>
+        </div>
+        <span className="trend"><TrendingUp size={15} /> Weight history</span>
+      </div>
+      <p className="muted">{weightProgressNote}</p>
+      <div className="chart-wrap">
+        {activityError ? (
+          <p className="muted">Weight history is unavailable until the saved activity can be loaded.</p>
+        ) : history.length === 0 ? (
+          <p className="muted">No weight entries yet. Log a weigh-in to start your history.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={history}>
+              <defs>
+                <linearGradient id="weightFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#b8e36a" stopOpacity={0.24} />
+                  <stop offset="100%" stopColor="#b8e36a" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="#252b26" vertical={false} />
+              <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#879087", fontSize: 11 }} />
+              <YAxis domain={["dataMin - 0.4", "dataMax + 0.4"]} axisLine={false} tickLine={false} tick={{ fill: "#879087", fontSize: 11 }} width={35} />
+              <Tooltip contentStyle={{ background: "#171c18", border: "1px solid #303a30", borderRadius: 12, color: "#f5f7f2" }} />
+              <Area type="monotone" dataKey="weight" stroke="#b8e36a" strokeWidth={2.5} fill="url(#weightFill)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </section>
+
     <div className="two-col">
-      <section className="panel"><div className="panel-heading"><div><h3>Nutrition today</h3><p className="muted">{proteinTarget ? `Your protein target is ${proteinTarget}g.` : "Set nutrition targets in your profile."}</p></div><button className="icon-button" onClick={() => onNavigate("nutrition")}><ArrowUpRight size={17} /></button></div><div className="macro-row"><span>Protein</span><strong>{totals.protein}{proteinTarget ? ` / ${proteinTarget}g` : "g"}</strong></div><ProgressBar value={totals.protein} target={proteinTarget} color="mint" /><div className="macro-row"><span>Calories</span><strong>{totals.calories}{caloriesTarget ? ` / ${caloriesTarget} kcal` : " kcal"}</strong></div><ProgressBar value={totals.calories} target={caloriesTarget} color="amber" /><div className="macro-row"><span>Carbs</span><strong>{totals.carbs}g</strong></div><div className="macro-row"><span>Fat</span><strong>{totals.fats}g</strong></div><button className="secondary full-button" onClick={() => onNavigate("nutrition")}>Log a meal <ArrowUpRight size={16} /></button></section>
-      <section className="panel"><div className="panel-heading"><div><h3>Next workout</h3><p className="muted">{plan?.label || "No workout plan yet"}</p></div><Dumbbell size={18} className="muted" /></div>{workoutDayName ? <div className="workout-next"><div className="workout-day">{String(activeDay + 1).padStart(2, "0")}</div><div><strong>{workoutDayName}</strong><p className="muted">{workoutDay.exercises?.length ?? plan.exercises?.length ?? 0} exercises</p></div></div> : <p className="muted">Your workout area will fill in after a personalized plan is generated.</p>}<button className="secondary full-button" onClick={() => onNavigate("training")}>{plan ? "Open training plan" : "Set up a workout plan"} <ArrowUpRight size={16} /></button></section>
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h3>Nutrition ({selectedDateLabel})</h3>
+            <p className="muted">{proteinTarget ? `Target: ${proteinTarget}g protein · ${caloriesTarget || "—"} kcal` : "Set nutrition targets in your profile."}</p>
+          </div>
+          <button className="icon-button" onClick={() => onNavigate("nutrition")}><ArrowUpRight size={17} /></button>
+        </div>
+        <div className="macro-row"><span>Protein</span><strong>{totals.protein}{proteinTarget ? ` / ${proteinTarget}g` : "g"}</strong></div>
+        <ProgressBar value={totals.protein} target={proteinTarget} color="mint" />
+        <div className="macro-row"><span>Calories</span><strong>{totals.calories}{caloriesTarget ? ` / ${caloriesTarget} kcal` : " kcal"}</strong></div>
+        <ProgressBar value={totals.calories} target={caloriesTarget} color="amber" />
+        <div className="macro-row"><span>Carbs</span><strong>{totals.carbs}g</strong></div>
+        <div className="macro-row"><span>Fat</span><strong>{totals.fats}g</strong></div>
+        {!isReadOnly && (
+          <button className="secondary full-button" onClick={() => onNavigate("nutrition")}>
+            Log a meal <ArrowUpRight size={16} />
+          </button>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h3>Today's Scheduled Session</h3>
+            <p className="muted">{plan?.label || "No workout plan yet"}</p>
+          </div>
+          <Dumbbell size={18} className="muted" />
+        </div>
+        {workoutDayName ? (
+          <div className="workout-next">
+            <div className="workout-day">
+              <Dumbbell size={18} />
+            </div>
+            <div>
+              <strong>{workoutDayName}</strong>
+              <p className="muted">{dayRoutine?.exercises?.length ?? 5} exercises programmed</p>
+            </div>
+          </div>
+        ) : (
+          <p className="muted">Your workout area will fill in after a personalized plan is generated.</p>
+        )}
+        <button className="secondary full-button" onClick={() => onNavigate("training")}>
+          {plan ? "Open today's workout" : "Set up a workout plan"} <ArrowUpRight size={16} />
+        </button>
+      </section>
     </div>
   </div>;
 }

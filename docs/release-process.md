@@ -6,13 +6,16 @@
 2. Run `npm --prefix frontend ci`, `npm --prefix frontend test`, and `npm --prefix frontend run build`.
 3. Run `supabase start` and `supabase test db` to apply the tracked migrations locally and run the
    RLS/schema contract checks.
-4. Configure a dedicated, disposable, onboarded test account and a Preview URL as GitHub Actions
+4. For this release, apply the approved profile-bootstrap migration to Production only to repair
+   auth-user creation and provision the disposable UAT account. It leaves the account unonboarded
+   and does not promote application code or Edge Functions.
+5. Configure a dedicated, disposable, onboarded test account and a Preview URL as GitHub Actions
    secrets `E2E_BASE_URL`, `E2E_USER_EMAIL`, and `E2E_USER_PASSWORD`. For Vercel-protected Preview
    deployments, also add the project's `VERCEL_AUTOMATION_BYPASS_SECRET` from Vercel's deployment
    protection settings. Dispatch the `Authenticated browser UAT` workflow. It writes one daily
    steps value and weight for that test account, then checks that those records survive a browser
    reload. Never use a customer account as the E2E test account.
-5. Before claiming remote schema verification or two-account isolation, run the migration and
+6. Before claiming remote schema verification or two-account isolation, run the migration and
    `supabase/tests/data_isolation.test.sql` against the intended Supabase environment. The local
    test is not a substitute for verifying live RLS policies and migrations.
 

@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyProfile } from "../src/data.js";
 import { authErrorMessage, signupSessionError } from "../src/lib/auth.js";
-import { buildWeightLogUpsert, calculateWeightProgress, formatSteps, stepsFromRow } from "../src/lib/activity.js";
+import { calculateRecommendedTargets, buildWeightLogUpsert, calculateWeightProgress, formatSteps, stepsFromRow } from "../src/lib/activity.js";
 import { isFitnessProfile, isMealPlan, isStepCount, isWeightKg, isWorkoutPlan, isWorkoutSet } from "../src/lib/validation.js";
+import { generateDailyMealPlan, generateScientificWorkoutPlan, generateJeffNippardWorkoutPlan, generateSouthIndianMealPlan } from "../src/lib/planGenerator.js";
 
 test("keeps onboarding profile values empty until supplied by the user", () => {
   assert.equal(emptyProfile.hasOnboarded, false);
@@ -136,3 +137,60 @@ test("directs duplicate sign-ups to sign in or password reset", () => {
   assert.match(signupSessionError({ identities: [{ id: "identity-1" }] }), /confirm your email/i);
   assert.match(signupSessionError(null), /confirm your email/i);
 });
+
+test("calculates recommended daily targets accurately from physical baseline", () => {
+  const targets = calculateRecommendedTargets({
+    heightCm: 175,
+    weightKg: 75,
+    goal: "FAT_LOSS",
+    activityLevel: "MODERATE"
+  });
+  assert.ok(targets.caloriesTarget > 1500 && targets.caloriesTarget < 2800);
+  assert.equal(targets.proteinTargetG, 150); // 75kg * 2.0
+  assert.equal(targets.stepTarget, 11000);
+});
+
+test("generates valid macro-balanced daily meal plans with timing for morning and evening workout routines", () => {
+  const profileMorning = {
+    caloriesTarget: 2100,
+    proteinTargetG: 140,
+    goal: "FAT_LOSS",
+    dietaryPreference: "NON_VEG",
+    workoutTiming: "MORNING"
+  };
+  const planMorning = generateDailyMealPlan(profileMorning);
+  assert.equal(isMealPlan(planMorning), true);
+  assert.ok(planMorning.meals.some(m => m.time && m.mealType.includes("Pre-Workout")));
+  assert.ok(planMorning.meals.some(m => m.name.toLowerCase().includes("idli") || m.name.toLowerCase().includes("rice") || m.name.toLowerCase().includes("sambar")));
+
+  const profileEveningVeg = {
+    caloriesTarget: 2000,
+    proteinTargetG: 130,
+    goal: "MUSCLE_GAIN",
+    dietaryPreference: "VEG",
+    workoutTiming: "EVENING"
+  };
+  const planEvening = generateDailyMealPlan(profileEveningVeg);
+  assert.equal(isMealPlan(planEvening), true);
+  assert.ok(planEvening.meals.some(m => m.time && m.mealType.includes("Pre-Workout")));
+  assert.ok(planEvening.meals.some(m => m.name.toLowerCase().includes("paneer") || m.name.toLowerCase().includes("soya") || m.name.toLowerCase().includes("dosa")));
+});
+
+test("generates evidence-based scientific workout plans tailored to equipment and injury limitations", () => {
+  const fullGymProfile = {
+    trainingDaysPerWeek: 4,
+    equipmentAccess: "FULL_GYM",
+    injuriesOrConditions: "lower back stiffness"
+  };
+  const planGym = generateScientificWorkoutPlan(fullGymProfile);
+  assert.equal(isWorkoutPlan(planGym, 4), true);
+
+  const homeProfile = {
+    trainingDaysPerWeek: 3,
+    equipmentAccess: "BODYWEIGHT",
+    injuriesOrConditions: "knee pain"
+  };
+  const planHome = generateScientificWorkoutPlan(homeProfile);
+  assert.equal(isWorkoutPlan(planHome, 3), true);
+});
+

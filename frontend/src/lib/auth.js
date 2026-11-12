@@ -14,5 +14,5 @@ export function signupSessionError(user) {
   if (Array.isArray(user?.identities) && user.identities.length === 0) {
     return "An account with this email may already exist. Sign in, or choose Forgot password to reset your password.";
   }
-  return "Check your inbox and confirm your email before signing in.";
+  return "Check your mail inbox and get verified";
 }

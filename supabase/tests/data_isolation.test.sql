@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(14);
+select extensions.plan(19);
 
 insert into auth.users (
   id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -11,13 +11,50 @@ insert into auth.users (
   ('60000000-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'rls-user-b@example.test', '', now(), '{}'::jsonb, '{}'::jsonb)
 on conflict (id) do nothing;
 
+select extensions.is(
+  (select count(*)::integer from public.profiles where id in (
+    '60000000-0000-4000-8000-000000000001',
+    '60000000-0000-4000-8000-000000000002'
+  )),
+  2,
+  'auth user creation bootstraps a profile'
+);
+select extensions.is(
+  (select has_onboarded from public.profiles where id = '60000000-0000-4000-8000-000000000001'),
+  false,
+  'new auth profiles remain unonboarded until a user saves a baseline'
+);
+select extensions.is(
+  (select not attnotnull from pg_attribute
+    where attrelid = 'public.profiles'::regclass and attname = 'steps_target' and not attisdropped),
+  true,
+  'new auth profiles may leave the step target unset until onboarding'
+);
+select extensions.is(
+  (select not attnotnull from pg_attribute
+    where attrelid = 'public.profiles'::regclass and attname = 'calories_target' and not attisdropped),
+  true,
+  'new auth profiles may leave the calorie target unset until onboarding'
+);
+
 insert into public.profiles (
   id, email, name, height_cm, weight_kg, goal, activity_level,
   training_days_per_week, steps_target, protein_target_g, calories_target, has_onboarded
 ) values
   ('60000000-0000-4000-8000-000000000001', 'rls-user-a@example.test', 'RLS User A', 170, 70, 'FAT_LOSS', 'MODERATE', 3, 8000, 100, 2000, true),
   ('60000000-0000-4000-8000-000000000002', 'rls-user-b@example.test', 'RLS User B', 175, 75, 'MUSCLE_GAIN', 'LIGHT', 4, 9000, 120, 2400, true)
-on conflict (id) do nothing;
+on conflict (id) do update set
+  email = excluded.email,
+  name = excluded.name,
+  height_cm = excluded.height_cm,
+  weight_kg = excluded.weight_kg,
+  goal = excluded.goal,
+  activity_level = excluded.activity_level,
+  training_days_per_week = excluded.training_days_per_week,
+  steps_target = excluded.steps_target,
+  protein_target_g = excluded.protein_target_g,
+  calories_target = excluded.calories_target,
+  has_onboarded = excluded.has_onboarded;
 
 insert into public.meal_logs (user_id, title, calories)
 values
@@ -49,6 +86,7 @@ values
   ('60000000-0000-4000-8000-000000000002', '{}'::jsonb, '{"label":"RLS meals B","meals":[]}');
 
 select extensions.has_column('public', 'profiles', 'target_weight_kg', 'profiles schema supports optional target weight');
+select extensions.has_column('public', 'profiles', 'has_onboarded', 'profiles distinguish incomplete onboarding from a saved baseline');
 select extensions.has_column('public', 'meal_logs', 'logged_at', 'meal logs have a persisted timestamp');
 select extensions.has_column('public', 'step_logs', 'log_date', 'step logs have a per-day key');
 select extensions.has_column('public', 'weight_logs', 'logged_on', 'weight logs have a local calendar date');

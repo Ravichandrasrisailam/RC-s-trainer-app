@@ -47,3 +47,72 @@ export function calculateWeightProgress(history, targetWeightKg, startWeightKg) 
       : null
   };
 }
+
+export function calculateRecommendedTargets({ heightCm, weightKg, goal, activityLevel, dob }) {
+  const height = Number(heightCm);
+  const weight = Number(weightKg);
+  if (!Number.isFinite(height) || height < 100 || !Number.isFinite(weight) || weight < 30) {
+    return null;
+  }
+
+  let age = 26;
+  if (dob) {
+    const birthDate = new Date(dob);
+    if (!Number.isNaN(birthDate.getTime())) {
+      const diffYears = new Date().getFullYear() - birthDate.getFullYear();
+      if (diffYears >= 16 && diffYears <= 90) age = diffYears;
+    }
+  }
+
+  // Mifflin-St Jeor formula
+  const bmr = 10 * weight + 6.25 * height - 5 * age + 5;
+
+  const activityMultipliers = {
+    SEDENTARY: 1.2,
+    LIGHT: 1.375,
+    MODERATE: 1.55,
+    VERY_ACTIVE: 1.725
+  };
+  const multiplier = activityMultipliers[activityLevel] || 1.375;
+  const maintenance = Math.round(bmr * multiplier);
+
+  let caloriesTarget = maintenance;
+  let proteinMultiplier = 2.0;
+  let stepTarget = 10000;
+
+  switch (goal) {
+    case "WEIGHT_LOSS":
+      caloriesTarget = Math.max(1200, Math.round(maintenance - 500));
+      proteinMultiplier = 1.8;
+      stepTarget = 10500;
+      break;
+    case "FAT_LOSS":
+      caloriesTarget = Math.max(1300, Math.round(maintenance - 400));
+      proteinMultiplier = 2.0;
+      stepTarget = 11000;
+      break;
+    case "MUSCLE_GAIN":
+      caloriesTarget = Math.round(maintenance + 300);
+      proteinMultiplier = 2.2;
+      stepTarget = 8000;
+      break;
+    case "RECOMPOSITION":
+    default:
+      caloriesTarget = Math.round(maintenance - 150);
+      proteinMultiplier = 2.0;
+      stepTarget = 9500;
+      break;
+  }
+
+  if (activityLevel === "SEDENTARY") stepTarget = Math.max(7000, stepTarget - 1500);
+  if (activityLevel === "VERY_ACTIVE") stepTarget = Math.min(15000, stepTarget + 2000);
+
+  const proteinTargetG = Math.min(350, Math.max(40, Math.round(weight * proteinMultiplier)));
+
+  return {
+    caloriesTarget: Math.round(caloriesTarget),
+    proteinTargetG,
+    proteinTarget: proteinTargetG,
+    stepTarget: Math.round(stepTarget / 500) * 500
+  };
+}
